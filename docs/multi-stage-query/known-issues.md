@@ -47,8 +47,6 @@ an [UnknownError](./reference.md#error-codes) with a message including "No space
   `java.lang.ClassCastException: class java.lang.Double cannot be cast to class org.apache.druid.collections.SerializablePair`.
   The string varieties, however, do work properly.
 
-
-
 ## INSERT and REPLACE
 
 - INSERT and REPLACE with column lists, like `INSERT INTO tbl (a, b, c) SELECT ...`, is not implemented.
