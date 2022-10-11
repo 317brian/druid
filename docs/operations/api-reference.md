@@ -33,21 +33,21 @@ The following endpoints are supported by all processes.
 
 #### GET
 
-* `/status`
+`/status`
 
-Returns the Druid version, loaded extensions, memory used, total memory and other useful information about the process.
+* Returns the Druid version, loaded extensions, memory used, total memory and other useful information about the process.
 
-* `/status/health`
+`/status/health`
 
-An endpoint that always returns a boolean "true" value with a 200 OK response, useful for automated health checks.
+* An endpoint that always returns a boolean "true" value with a 200 OK response, useful for automated health checks.
 
-* `/status/properties`
+`/status/properties`
 
-Returns the current configuration properties of the process.
+* Returns the current configuration properties of the process.
 
-* `/status/selfDiscovered/status`
+`/status/selfDiscovered/status`
 
-Returns a JSON map of the form `{"selfDiscovered": true/false}`, indicating whether the node has received a confirmation
+* Returns a JSON map of the form `{"selfDiscovered": true/false}`, indicating whether the node has received a confirmation
 from the central node discovery mechanism (currently ZooKeeper) of the Druid cluster that the node has been added to the
 cluster. It is recommended to not consider a Druid node "healthy" or "ready" in automated deployment/container
 management systems until it returns `{"selfDiscovered": true}` from this endpoint. This is because a node may be
@@ -58,9 +58,9 @@ to receive data from the ZooKeeper cluster. `{"selfDiscovered": true}` is a prox
 client on the node has started to receive data from the ZooKeeper cluster and it's expected that all segments and other
 nodes will be discovered by this node timely from this point.
 
-* `/status/selfDiscovered`
+`/status/selfDiscovered`
 
-Similar to `/status/selfDiscovered/status`, but returns 200 OK response with empty body if the node has discovered itself
+* Similar to `/status/selfDiscovered/status`, but returns 200 OK response with empty body if the node has discovered itself
 and 503 SERVICE UNAVAILABLE if the node hasn't discovered itself yet. This endpoint might be useful because some
 monitoring checks such as AWS load balancer health checks are not able to look at the response body.
 
@@ -75,13 +75,13 @@ in the suggested [three-server configuration](../design/processes.md#server-type
 
 ##### GET
 
-* `/druid/coordinator/v1/leader`
+`/druid/coordinator/v1/leader`
 
-Returns the current leader Coordinator of the cluster.
+* Returns the current leader Coordinator of the cluster.
 
-* `/druid/coordinator/v1/isLeader`
+`/druid/coordinator/v1/isLeader`
 
-Returns a JSON object with field "leader", either true or false, indicating if this server is the current leader
+* Returns a JSON object with field "leader", either true or false, indicating if this server is the current leader
 Coordinator of the cluster. In addition, returns HTTP 200 if the server is the current leader and HTTP 404 if not.
 This is suitable for use as a load balancer status check if you only want the active leader to be considered in-service
 at the load balancer.
@@ -92,37 +92,37 @@ at the load balancer.
 
 ##### GET
 
-* `/druid/coordinator/v1/loadstatus`
+`/druid/coordinator/v1/loadstatus`
 
-Returns the percentage of segments actually loaded in the cluster versus segments that should be loaded in the cluster.
+* Returns the percentage of segments actually loaded in the cluster versus segments that should be loaded in the cluster.
 
- * `/druid/coordinator/v1/loadstatus?simple`
+`/druid/coordinator/v1/loadstatus?simple`
 
-Returns the number of segments left to load until segments that should be loaded in the cluster are available for queries. This does not include segment replication counts.
+* Returns the number of segments left to load until segments that should be loaded in the cluster are available for queries. This does not include segment replication counts.
 
-* `/druid/coordinator/v1/loadstatus?full`
+`/druid/coordinator/v1/loadstatus?full`
 
-Returns the number of segments left to load in each tier until segments that should be loaded in the cluster are all available. This includes segment replication counts.
+* Returns the number of segments left to load in each tier until segments that should be loaded in the cluster are all available. This includes segment replication counts.
 
-* `/druid/coordinator/v1/loadstatus?full&computeUsingClusterView`
+`/druid/coordinator/v1/loadstatus?full&computeUsingClusterView`
 
-Returns the number of segments not yet loaded for each tier until all segments loading in the cluster are available.
+* Returns the number of segments not yet loaded for each tier until all segments loading in the cluster are available.
 The result includes segment replication counts. It also factors in the number of available nodes that are of a service type that can load the segment when computing the number of segments remaining to load.
 A segment is considered fully loaded when:
-- Druid has replicated it the number of times configured in the corresponding load rule.
-- Or the number of replicas for the segment in each tier where it is configured to be replicated equals the available nodes of a service type that are currently allowed to load the segment in the tier.
+  - Druid has replicated it the number of times configured in the corresponding load rule.
+  - Or the number of replicas for the segment in each tier where it is configured to be replicated equals the available nodes of a service type that are currently allowed to load the segment in the tier.
 
-* `/druid/coordinator/v1/loadqueue`
+`/druid/coordinator/v1/loadqueue`
 
-Returns the ids of segments to load and drop for each Historical process.
+* Returns the ids of segments to load and drop for each Historical process.
 
-* `/druid/coordinator/v1/loadqueue?simple`
+`/druid/coordinator/v1/loadqueue?simple`
 
-Returns the number of segments to load and drop, as well as the total segment load and drop size in bytes for each Historical process.
+* Returns the number of segments to load and drop, as well as the total segment load and drop size in bytes for each Historical process.
 
-* `/druid/coordinator/v1/loadqueue?full`
+`/druid/coordinator/v1/loadqueue?full`
 
-Returns the serialized JSON of segments to load and drop for each Historical process.
+* Returns the serialized JSON of segments to load and drop for each Historical process.
 
 
 #### Segment Loading by Datasource
