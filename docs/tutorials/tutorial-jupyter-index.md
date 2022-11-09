@@ -1,6 +1,6 @@
 ---
 id: tutorial-jupyter-index
-title: "Jupyter notebook tutorials"
+title: "Jupyter Notebook tutorials"
 ---
 
 <!--
@@ -22,7 +22,7 @@ title: "Jupyter notebook tutorials"
   ~ under the License.
   -->
 
-You can try out the Druid APIs using the Jupyter notebook-based tutorials that are available. These tutorials provide snippets of Python code that you can use to run calls against the Druid API.
+You can try out the Druid APIs using the Jupyter Notebook-based tutorials that are available. These tutorials provide snippets of Python code that you can use to run calls against the Druid API.
 
 ## Before you start
 
@@ -36,7 +36,7 @@ Make sure you meet the following requirements before starting the Jupyter-based 
    pip3 install requests
    ````
 
-- Jupyter lab (recommended) or Jupyter notebook running on a non-default port. By default, Druid and Jupyter both try to use port `8888,` so start Jupyter on a different port. For example, use the following command to start Jupyter lab on port `3001`:
+- Jupyter Lab (recommended) or Jupyter Notebook running on a non-default port. By default, Druid and Jupyter both try to use port `8888,` so start Jupyter on a different port. For example, use the following command to start Jupyter Lab on port `3001`:
    
    ```bash
    jupyter lab --port 3001
@@ -46,4 +46,6 @@ Make sure you meet the following requirements before starting the Jupyter-based 
 
 ## Tutorials
 
-- [Introduction to the Druid API](./jupyter/api-tutorial.ipynb) walks you through some of the basics related to the Druid API and several endpoints.
+Download 
+
+- [Introduction to the Druid API](https://github.com/apache/druid/tree/master/examples/quickstart/jupyter-notebooks/api-tutorial.ipynb) walks you through some of the basics related to the Druid API and several endpoints.
