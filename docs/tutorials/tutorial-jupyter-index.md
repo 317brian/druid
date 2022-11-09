@@ -22,7 +22,9 @@ title: "Jupyter Notebook tutorials"
   ~ under the License.
   -->
 
-You can try out the Druid APIs using the Jupyter Notebook-based tutorials that are available. These tutorials provide snippets of Python code that you can use to run calls against the Druid API.
+<!-- tutorial-jupyter-index.md and examples/quickstart/juptyer-notebooks/README.md share a lot of the same content. If you make a change in one place, update the other too. -->
+
+You can try out the Druid APIs using the Jupyter Notebook-based tutorials. These tutorials provide snippets of Python code that you can use to run calls against the Druid API.
 
 ## Before you start
 
@@ -46,6 +48,8 @@ Make sure you meet the following requirements before starting the Jupyter-based 
 
 ## Tutorials
 
-Download 
+The notebooks are located in the [apache/druid repo](https://github.com/apache/druid/tree/master/examples/quickstart/jupyter-notebooks/). You can either clone the repo or download the notebooks you want individually. 
 
-- [Introduction to the Druid API](https://github.com/apache/druid/tree/master/examples/quickstart/jupyter-notebooks/api-tutorial.ipynb) walks you through some of the basics related to the Druid API and several endpoints.
+The links that follow are the raw GitHub URLs, so you can use them to download the notebook directly, such as with `wget`, or manually through your web browser. Note that if you save the file from your web browser, make sure to remove the `.txt` extension.
+
+- [Introduction to the Druid API](https://raw.githubusercontent.com/apache/druid/master/api-tutorial-jupyter-nb/examples/quickstart/jupyter-notebooks/api-tutorial.ipynb) walks you through some of the basics related to the Druid API and several endpoints.
