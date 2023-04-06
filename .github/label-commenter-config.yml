@@ -1,0 +1,7 @@
+labels:
+
+  - name: "Area - Documentation"
+    labeled:
+      issue:
+        body: |
+          Added the label Area - Documentation
