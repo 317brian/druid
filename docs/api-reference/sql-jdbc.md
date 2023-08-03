@@ -69,7 +69,7 @@ String url = "jdbc:avatica:remote:url=http://localhost:8082/druid/v2/sql/avatica
 
 :::info
 The protobuf endpoint is also known to work with the official [Golang Avatica driver](https://github.com/apache/calcite-avatica-go)
-:::info
+:::
 
 Table metadata is available over JDBC using `connection.getMetaData()` or by querying the
 [INFORMATION_SCHEMA tables](../querying/sql-metadata-tables.md). For an example of this, see [Get the metadata for a datasource](#get-the-metadata-for-a-datasource).
