@@ -32,15 +32,14 @@ By default, security features in Druid are disabled, which simplifies the initia
 
 The following recommendations apply to the Druid cluster setup:
 * Run Druid as an unprivileged Unix user. Do not run Druid as the root user.
-:::info
- **WARNING!** \
+:::caution
 Druid administrators have the same OS permissions as the Unix user account running Druid. See [Authentication and authorization model](security-user-auth.md#authentication-and-authorization-model). If the Druid process is running under the OS root user account, then Druid administrators can read or write all files that the root account has access to, including sensitive files such as `/etc/passwd`.
+:::
 * Enable authentication to the Druid cluster for production environments and other environments that can be accessed by untrusted networks.
 * Enable authorization and do not expose the web console without authorization enabled. If authorization is not enabled, any user that has access to the web console has the same privileges as the operating system user that runs the web console process.
 * Grant users the minimum permissions necessary to perform their functions. For instance, do not allow users who only need to query data to write to data sources or view state.
 * Do not provide plain-text passwords for production systems in configuration specs. For example, sensitive properties should not be in the `consumerProperties` field of `KafkaSupervisorIngestionSpec`. See [Environment variable dynamic config provider](./dynamic-config-provider.md#environment-variable-dynamic-config-provider) for more information.
 * Disable JavaScript, as noted in the [Security section](https://druid.apache.org/docs/latest/development/javascript.html#security) of the JavaScript guide.
-:::
 
 The following recommendations apply to the network where Druid runs:
 * Enable TLS to encrypt communication within the cluster.
@@ -84,8 +83,8 @@ keytool -import -file public.cert -alias druid -keystore truststore.jks
 Druid uses Jetty as its embedded web server. See [Configuring SSL/TLS KeyStores
 ](https://www.eclipse.org/jetty/documentation/jetty-11/operations-guide/index.html#og-keystore) from the Jetty documentation.
 
-:::info
- WARNING: Do not use self-signed certificates for production environments. Instead, rely on your current public key infrastructure to generate and distribute trusted keys.
+:::caution
+Do not use self-signed certificates for production environments. Instead, rely on your current public key infrastructure to generate and distribute trusted keys.
 :::
 
 ### Update Druid TLS configurations
