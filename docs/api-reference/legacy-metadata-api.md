@@ -304,9 +304,9 @@ If no interval is specified, a default interval spanning a configurable period b
  This API is deprecated and will be removed in future releases. Please use [SegmentMetadataQuery](../querying/segmentmetadataquery.md) instead
  which provides more comprehensive information and supports all dataSource types including streaming dataSources. It's also encouraged to use [INFORMATION_SCHEMA tables](../querying/sql-metadata-tables.md)
  if you're using SQL.
+:::
 
 Returns the dimensions of the datasource.
-:::
 
 `GET /druid/v2/datasources/{dataSourceName}/metrics`
 

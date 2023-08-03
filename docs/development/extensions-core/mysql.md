@@ -78,10 +78,8 @@ This extension also supports using MariaDB server, https://mariadb.org/download/
   Connect to MySQL from the machine where it is installed.
 
   ```bash
-:::info
- mysql -u root
-```
-:::
+  mysql -u root
+  ```
 
   Paste the following snippet into the mysql prompt:
 

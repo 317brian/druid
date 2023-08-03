@@ -152,7 +152,8 @@ You can now see the data as a datasource in the console and try out a query, as 
 
 :::info
  Notice the other actions you can perform for a datasource, including configuring retention rules, compaction, and more.
-3. Run the prepopulated query, `SELECT * FROM "wikipedia"` to see the results.
 :::
+
+3. Run the prepopulated query, `SELECT * FROM "wikipedia"` to see the results.
 
    ![Query view](../assets/tutorial-batch-data-loader-11.png "Query view")
