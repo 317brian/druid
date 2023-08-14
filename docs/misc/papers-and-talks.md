@@ -24,6 +24,8 @@ title: "Papers"
 
 ## Papers
 
+test changes
+
 * [Druid: A Real-time Analytical Data Store](http://static.druid.io/docs/druid.pdf) - Discusses the Druid architecture in detail.
 
 * [The RADStack: Open Source Lambda Architecture for Interactive Analytics](http://static.druid.io/docs/radstack.pdf) - Discusses how Druid supports real-time and batch workflows.
