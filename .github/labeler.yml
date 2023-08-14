@@ -23,5 +23,5 @@
 "Area - Documentation":
   - "docs/**/*"
   - "website/**"
-  - "examples/quickstart/jupyter-notebooks/**/*"
-  - "examples/quickstart/jupyter-notebooks/notebooks/01-introduction/00-START-HERE.ipynb"
+  - "examples/quickstart/jupyter-notebooks/**"
+  - 
