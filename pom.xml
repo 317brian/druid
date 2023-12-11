@@ -2177,12 +2177,6 @@
             </build>
         </profile>
         <profile>
-          <id>website-docs</id>
-          <modules>
-            <module>website</module>
-          </modules>
-        </profile>
-        <profile>
           <id>skip-static-checks</id>
           <properties>
             <animal.sniffer.skip>true</animal.sniffer.skip>
