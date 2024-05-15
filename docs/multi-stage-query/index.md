@@ -30,7 +30,7 @@ description: Introduces multi-stage query architecture and its task engine
  ingestion method is right for you.
 :::
 
-Apache Druid supports SQL-based ingestion using the bundled [`druid-multi-stage-query` extension](#load-the-extension).
+Apache Druid supports SQL-based ingestion using the bundled `druid-multi-stage-query` extension, which is enabled by default.
 This extension adds a [multi-stage query task engine for SQL](concepts.md#multi-stage-query-task-engine) that allows running SQL
 [INSERT](concepts.md#insert) and [REPLACE](concepts.md#replace) statements as batch tasks. As an experimental feature,
 the task engine also supports running `SELECT` queries as batch tasks.
@@ -39,6 +39,11 @@ Nearly all `SELECT` capabilities are available in the multi-stage query (MSQ) ta
 issues](./known-issues.md#select-statement) page. This allows great flexibility to apply transformations, filters, JOINs,
 aggregations, and so on as part of `INSERT ... SELECT` and `REPLACE ... SELECT` statements. This also allows in-database
 transformation: creating new tables based on queries of other tables.
+
+To use [EXTERN](reference.md#extern-function), you need READ permission on the resource named "EXTERNAL" of the resource type
+"EXTERNAL". If you encounter a 403 error when trying to use `EXTERN`, verify that you have the correct permissions.
+The same is true of any of the input-source specific table function such as `S3` or `LOCALFILES`.
+
 
 ## Vocabulary
 
@@ -59,16 +64,6 @@ transformation: creating new tables based on queries of other tables.
 - **Shuffle**: Workers exchange data between themselves on a per-partition basis in a process called
   shuffling. During a shuffle, each output partition is sorted by a clustering key.
 
-## Load the extension
-
-To add the extension to an existing cluster, add `druid-multi-stage-query` to `druid.extensions.loadlist` in your
-`common.runtime.properties` file.
-
-For more information about how to load an extension, see [Loading extensions](../configuration/extensions.md#loading-extensions).
-
-To use [EXTERN](reference.md#extern-function), you need READ permission on the resource named "EXTERNAL" of the resource type
-"EXTERNAL". If you encounter a 403 error when trying to use `EXTERN`, verify that you have the correct permissions.
-The same is true of any of the input-source specific table function such as `S3` or `LOCALFILES`.
 
 ## Next steps
 
