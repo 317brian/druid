@@ -65,7 +65,7 @@ A tableSpec defines a table
 |--------------|---------------------|------------------------------------------------------------------------------------------------------------------------|----------|---------|
 | `name`       | String              | The name of the column                                                                                                 | yes      | null    |
 | `dataType`   | String              | The type of the column. Can be any column data type that is available to Druid. Depends on what extensions are loaded. | no       | null    |
-| `properties` | Map<String, Object> | the column's defined properties. Non properties defined at this time.                                                  | no       | null    |
+| `properties` | Map\<String, Object\> | the column's defined properties. Non properties defined at this time.                                                  | no       | null    |
 
 ### APIs
 
@@ -186,7 +186,7 @@ Retrieve a table
 
 ##### URL
 
-`GET` `/druid/coordinator/v1/catalog/schemas/{schema}/tables/{name}
+`GET` `/druid/coordinator/v1/catalog/schemas/{schema}/tables/{name}`
 
 ##### Responses
 
@@ -283,7 +283,7 @@ Delete a table
 
 ##### URL
 
-`DELETE` `/druid/coordinator/v1/catalog/schemas/{schema}/tables/{name}
+`DELETE` `/druid/coordinator/v1/catalog/schemas/{schema}/tables/{name}`
 
 ##### Responses
 
@@ -337,7 +337,7 @@ retrieve list of schema names
 
 ##### URL
 
-`GET` `/druid/coordinator/v1/catalog/schemas
+`GET` `/druid/coordinator/v1/catalog/schemas`
 
 ##### Responses
 
@@ -400,7 +400,7 @@ Retrieve a list of table names in the schema.
 
 ##### URL
 
-`GET` `/druid/coordinator/v1/catalog/schemas/{schema}/table
+`GET` `/druid/coordinator/v1/catalog/schemas/{schema}/table`
 
 ##### Responses
 
