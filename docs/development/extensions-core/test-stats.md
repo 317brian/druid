@@ -31,13 +31,16 @@ Make sure to include `druid-stats` extension in order to use these aggregators.
 
 Please refer to [https://www.isixsigma.com/tools-templates/hypothesis-testing/making-sense-two-proportions-test/](https://www.isixsigma.com/tools-templates/hypothesis-testing/making-sense-two-proportions-test/) and [http://www.ucs.louisiana.edu/~jcb0773/Berry_statbook/Berry_statbook_chpt6.pdf](http://www.ucs.louisiana.edu/~jcb0773/Berry_statbook/Berry_statbook_chpt6.pdf) for more details.
 
-z = (p1 - p2) / S.E.  (assuming null hypothesis is true)
+```
+z = (p1 - p2) / S.E.  (assuming null hypothesis is true)
+```
 
 Please see below for p1 and p2.
 Please note S.E. stands for standard error where
 
+```
 S.E. = sqrt{ p1 * ( 1 - p1 )/n1 + p2 * (1 - p2)/n2) }
-
+```
 (p1 – p2) is the observed difference between two sample proportions.
 
 ### zscore2sample post aggregator
