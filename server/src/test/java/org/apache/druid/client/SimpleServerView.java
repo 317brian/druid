@@ -23,14 +23,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Ordering;
 import org.apache.druid.client.selector.HighestPriorityTierSelectorStrategy;
-import org.apache.druid.client.selector.QueryableDruidServer;
 import org.apache.druid.client.selector.RandomServerSelectorStrategy;
 import org.apache.druid.client.selector.ServerSelector;
 import org.apache.druid.client.selector.TierSelectorStrategy;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.http.client.HttpClient;
 import org.apache.druid.query.QueryRunner;
-import org.apache.druid.query.QueryToolChestWarehouse;
+import org.apache.druid.query.QueryRunnerFactoryConglomerate;
 import org.apache.druid.query.QueryWatcher;
 import org.apache.druid.query.TableDataSource;
 import org.apache.druid.query.planning.DataSourceAnalysis;
@@ -63,38 +62,26 @@ public class SimpleServerView implements TimelineServerView
   // dataSource -> version -> serverSelector
   private final Map<String, VersionedIntervalTimeline<String, ServerSelector>> timelines = new HashMap<>();
 
-  private final QueryToolChestWarehouse warehouse;
-  private final ObjectMapper objectMapper;
-  private final HttpClient httpClient;
+  private final DirectDruidClientFactory clientFactory;
 
   public SimpleServerView(
-      QueryToolChestWarehouse warehouse,
+      QueryRunnerFactoryConglomerate conglomerate,
       ObjectMapper objectMapper,
       HttpClient httpClient
   )
   {
-    this.warehouse = warehouse;
-    this.objectMapper = objectMapper;
-    this.httpClient = httpClient;
+    this.clientFactory = new DirectDruidClientFactory(
+        new NoopServiceEmitter(),
+        conglomerate,
+        NOOP_QUERY_WATCHER,
+        objectMapper,
+        httpClient
+    );
   }
 
   public void addServer(DruidServer server, DataSegment dataSegment)
   {
-    servers.put(
-        server,
-        new QueryableDruidServer<>(
-            server,
-            new DirectDruidClient<>(
-                warehouse,
-                NOOP_QUERY_WATCHER,
-                objectMapper,
-                httpClient,
-                server.getScheme(),
-                server.getHost(),
-                new NoopServiceEmitter()
-            )
-        )
-    );
+    servers.put(server, new QueryableDruidServer(server, clientFactory.makeDirectClient(server)));
     addSegmentToServer(server, dataSegment);
   }
 
@@ -151,6 +138,7 @@ public class SimpleServerView implements TimelineServerView
     return Collections.emptyList();
   }
 
+  @SuppressWarnings("unchecked")
   @Override
   public <T> QueryRunner<T> getQueryRunner(DruidServer server)
   {

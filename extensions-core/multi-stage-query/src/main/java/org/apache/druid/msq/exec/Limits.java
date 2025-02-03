@@ -24,7 +24,7 @@ public class Limits
   /**
    * Maximum number of columns that can appear in a frame signature.
    * <p>
-   * Somewhat less than {@link WorkerMemoryParameters#STANDARD_FRAME_SIZE} divided by typical minimum column size:
+   * Somewhat less than {@link WorkerMemoryParameters#DEFAULT_FRAME_SIZE} divided by typical minimum column size:
    * {@link org.apache.druid.frame.allocation.AppendableMemory#DEFAULT_INITIAL_ALLOCATION_SIZE}.
    */
   public static final int MAX_FRAME_COLUMNS = 2000;
@@ -70,12 +70,6 @@ public class Limits
   public static final int MAX_KERNEL_MANIPULATION_QUEUE_SIZE = 100_000;
 
   /**
-   * Maximum number of bytes buffered for each side of a
-   * {@link org.apache.druid.msq.querykit.common.SortMergeJoinFrameProcessor}, not counting the most recent frame read.
-   */
-  public static final int MAX_BUFFERED_BYTES_FOR_SORT_MERGE_JOIN = 10_000_000;
-
-  /**
    * Maximum relaunches across all workers.
    */
   public static final int TOTAL_RELAUNCH_LIMIT = 100;
@@ -90,4 +84,24 @@ public class Limits
    * {@link ClusterStatisticsMergeMode#SEQUENTIAL} mode is chosen.
    */
   public static final long MAX_WORKERS_FOR_PARALLEL_MERGE = 100;
+
+  /**
+   * Max number of rows in the query reports of SELECT queries run by MSQ when using
+   * {@link org.apache.druid.msq.indexing.destination.DurableStorageMSQDestination}. Reports in this mode contain a
+   * preview of actual query results, but not the full resultset.This ensures that the reports do not blow up in
+   * size for queries operating on larger datasets.
+   */
+  public static final long MAX_SELECT_RESULT_ROWS = 3_000;
+
+  /**
+   * Max number of partition buckets for ingestion queries.
+   */
+  public static final int MAX_PARTITION_BUCKETS = 5_000;
+
+  /**
+   * Max number of rows with the same key in a window. This acts as a guardrail for
+   * data distribution with high cardinality
+   */
+  public static final int MAX_ROWS_MATERIALIZED_IN_WINDOW = 100_000;
+
 }

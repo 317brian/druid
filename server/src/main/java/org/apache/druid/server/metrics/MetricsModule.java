@@ -41,12 +41,16 @@ import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.java.util.emitter.service.ServiceEmitter;
 import org.apache.druid.java.util.metrics.BasicMonitorScheduler;
 import org.apache.druid.java.util.metrics.ClockDriftSafeMonitorScheduler;
+import org.apache.druid.java.util.metrics.DruidMonitorSchedulerConfig;
 import org.apache.druid.java.util.metrics.JvmCpuMonitor;
 import org.apache.druid.java.util.metrics.JvmMonitor;
 import org.apache.druid.java.util.metrics.JvmThreadsMonitor;
 import org.apache.druid.java.util.metrics.Monitor;
 import org.apache.druid.java.util.metrics.MonitorScheduler;
+import org.apache.druid.java.util.metrics.NoopOshiSysMonitor;
 import org.apache.druid.java.util.metrics.NoopSysMonitor;
+import org.apache.druid.java.util.metrics.OshiSysMonitor;
+import org.apache.druid.java.util.metrics.OshiSysMonitorConfig;
 import org.apache.druid.java.util.metrics.SysMonitor;
 import org.apache.druid.query.ExecutorServiceMonitor;
 
@@ -63,7 +67,7 @@ import java.util.stream.Collectors;
  */
 public class MetricsModule implements Module
 {
-  static final String MONITORING_PROPERTY_PREFIX = "druid.monitoring";
+  public static final String MONITORING_PROPERTY_PREFIX = "druid.monitoring";
   private static final Logger log = new Logger(MetricsModule.class);
   private Set<NodeRole> nodeRoles;
 
@@ -83,12 +87,12 @@ public class MetricsModule implements Module
   {
     JsonConfigProvider.bind(binder, MONITORING_PROPERTY_PREFIX, DruidMonitorSchedulerConfig.class);
     JsonConfigProvider.bind(binder, MONITORING_PROPERTY_PREFIX, MonitorsConfig.class);
+    JsonConfigProvider.bind(binder, OshiSysMonitorConfig.PREFIX, OshiSysMonitorConfig.class);
 
     DruidBinders.metricMonitorBinder(binder); // get the binder so that it will inject the empty set at a minimum.
 
     binder.bind(DataSourceTaskIdHolder.class).in(LazySingleton.class);
 
-    binder.bind(EventReceiverFirehoseRegister.class).in(LazySingleton.class);
     binder.bind(ExecutorServiceMonitor.class).in(LazySingleton.class);
 
     // Instantiate eagerly so that we get everything registered and put into the Lifecycle
@@ -108,7 +112,10 @@ public class MetricsModule implements Module
   )
   {
     List<Monitor> monitors = new ArrayList<>();
-
+    // HACK: when ServiceStatusMonitor is the first to be loaded, it introduces a circular dependency between
+    // CliPeon.runTask and CliPeon.getDataSourceFromTask/CliPeon.getTaskIDFromTask. The reason for this is unclear
+    // but by injecting DataSourceTaskIdHolder early this cycle is avoided.
+    injector.getInstance(DataSourceTaskIdHolder.class);
     for (Class<? extends Monitor> monitorClass : Iterables.concat(monitorsConfig.getMonitors(), monitorSet)) {
       monitors.add(injector.getInstance(monitorClass));
     }
@@ -190,6 +197,25 @@ public class MetricsModule implements Module
           dataSourceTaskIdHolder.getTaskId()
       );
       return new SysMonitor(dimensions);
+    }
+  }
+
+  @Provides
+  @ManageLifecycle
+  public OshiSysMonitor getOshiSysMonitor(
+      DataSourceTaskIdHolder dataSourceTaskIdHolder,
+      @Self Set<NodeRole> nodeRoles,
+      OshiSysMonitorConfig oshiSysConfig
+  )
+  {
+    if (nodeRoles.contains(NodeRole.PEON)) {
+      return new NoopOshiSysMonitor();
+    } else {
+      Map<String, String[]> dimensions = MonitorsConfig.mapOfDatasourceAndTaskID(
+          dataSourceTaskIdHolder.getDataSource(),
+          dataSourceTaskIdHolder.getTaskId()
+      );
+      return new OshiSysMonitor(dimensions, oshiSysConfig);
     }
   }
 }

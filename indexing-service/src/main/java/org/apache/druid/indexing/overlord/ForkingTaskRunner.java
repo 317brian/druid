@@ -97,6 +97,25 @@ public class ForkingTaskRunner
 {
   private static final EmittingLogger LOGGER = new EmittingLogger(ForkingTaskRunner.class);
   private static final String CHILD_PROPERTY_PREFIX = "druid.indexer.fork.property.";
+
+  /**
+   * Properties to add on Java 11+. When updating this list, update all four:
+   *  1) ForkingTaskRunner#STRONG_ENCAPSULATION_PROPERTIES (here) -->
+   *  2) docs/operations/java.md, "Strong encapsulation" section -->
+   *  3) pom.xml, jdk.strong.encapsulation.argLine -->
+   *  4) examples/bin/run-java script
+   */
+  private static final List<String> STRONG_ENCAPSULATION_PROPERTIES = ImmutableList.of(
+      "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+      "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+      "--add-opens=java.base/java.nio=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+      "--add-opens=java.base/java.io=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      "--add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED"
+  );
+
   private final ForkingTaskRunnerConfig config;
   private final Properties props;
   private final TaskLogPusher taskLogPusher;
@@ -109,10 +128,10 @@ public class ForkingTaskRunner
   private volatile int numProcessorsPerTask = -1;
   private volatile boolean stopping = false;
 
-  private static final AtomicLong LAST_REPORTED_FAILED_TASK_COUNT = new AtomicLong();
-  private static final AtomicLong FAILED_TASK_COUNT = new AtomicLong();
-  private static final AtomicLong SUCCESSFUL_TASK_COUNT = new AtomicLong();
-  private static final AtomicLong LAST_REPORTED_SUCCESSFUL_TASK_COUNT = new AtomicLong();
+  private final AtomicLong lastReportedFailedTaskCount = new AtomicLong();
+  private final AtomicLong failedTaskCount = new AtomicLong();
+  private final AtomicLong successfulTaskCount = new AtomicLong();
+  private final AtomicLong lastReportedSuccessfulTaskCount = new AtomicLong();
 
   @Inject
   public ForkingTaskRunner(
@@ -149,7 +168,7 @@ public class ForkingTaskRunner
           new ForkingTaskRunnerWorkItem(
             task,
             exec.submit(
-              new Callable<TaskStatus>() {
+              new Callable<>() {
                 @Override
                 public TaskStatus call()
                 {
@@ -224,6 +243,11 @@ public class ForkingTaskRunner
                         }
 
                         command.add(config.getJavaCommand());
+
+                        if (JvmUtils.majorVersion() >= 11) {
+                          command.addAll(STRONG_ENCAPSULATION_PROPERTIES);
+                        }
+
                         command.add("-cp");
                         command.add(taskClasspath);
 
@@ -249,7 +273,7 @@ public class ForkingTaskRunner
                         try {
                           List<String> taskJavaOptsArray = jsonMapper.convertValue(
                               task.getContextValue(ForkingTaskRunnerConfig.JAVA_OPTS_ARRAY_PROPERTY),
-                              new TypeReference<List<String>>() {}
+                              new TypeReference<>() {}
                           );
                           if (taskJavaOptsArray != null) {
                             command.addAll(taskJavaOptsArray);
@@ -290,10 +314,13 @@ public class ForkingTaskRunner
                         if (context != null) {
                           for (String propName : context.keySet()) {
                             if (propName.startsWith(CHILD_PROPERTY_PREFIX)) {
-                              command.addSystemProperty(
-                                  propName.substring(CHILD_PROPERTY_PREFIX.length()),
-                                  task.getContextValue(propName)
-                              );
+                              Object contextValue = task.getContextValue(propName);
+                              if (contextValue != null) {
+                                command.addSystemProperty(
+                                    propName.substring(CHILD_PROPERTY_PREFIX.length()),
+                                    String.valueOf(contextValue)
+                                );
+                              }
                             }
                           }
                         }
@@ -313,6 +340,10 @@ public class ForkingTaskRunner
                         command.addSystemProperty(
                             MonitorsConfig.METRIC_DIMENSION_PREFIX + DruidMetrics.TASK_TYPE,
                             task.getType()
+                        );
+                        command.addSystemProperty(
+                            MonitorsConfig.METRIC_DIMENSION_PREFIX + DruidMetrics.GROUP_ID,
+                            task.getGroupId()
                         );
 
 
@@ -345,18 +376,22 @@ public class ForkingTaskRunner
                         }
 
                         // If the task type is queryable, we need to load broadcast segments on the peon, used for
-                        // join queries
+                        // join queries. This is replaced by --loadBroadcastDatasourceMode option, but is preserved here
+                        // for backwards compatibility and can be removed in a future release.
                         if (task.supportsQueries()) {
                           command.add("--loadBroadcastSegments");
                           command.add("true");
                         }
+
+                        command.add("--loadBroadcastDatasourceMode");
+                        command.add(task.getBroadcastDatasourceLoadingSpec().getMode().toString());
 
                         if (!taskFile.exists()) {
                           jsonMapper.writeValue(taskFile, task);
                         }
 
                         LOGGER.info(
-                            "Running command: %s",
+                            "Running command[%s]",
                             getMaskedCommand(startupLoggingConfig.getMaskProperties(), command.getCommandList())
                         );
                         taskWorkItem.processHolder = runTaskProcess(command.getCommandList(), logFile, taskLocation);
@@ -372,15 +407,15 @@ public class ForkingTaskRunner
                           TaskStatus.running(task.getId())
                       );
 
-                      LOGGER.info("Logging task %s output to: %s", task.getId(), logFile);
+                      LOGGER.info("Logging output of task[%s] to file[%s].", task.getId(), logFile);
                       final int exitCode = waitForTaskProcessToComplete(task, processHolder, logFile, reportsFile);
                       final TaskStatus status;
                       if (exitCode == 0) {
-                        LOGGER.info("Process exited successfully for task: %s", task.getId());
+                        LOGGER.info("Process exited successfully for task[%s]", task.getId());
                         // Process exited successfully
                         status = jsonMapper.readValue(statusFile, TaskStatus.class);
                       } else {
-                        LOGGER.error("Process exited with code[%d] for task: %s", exitCode, task.getId());
+                        LOGGER.error("Process exited with code[%d] for task[%s]", exitCode, task.getId());
                         // Process exited unsuccessfully
                         status = TaskStatus.failure(
                             task.getId(),
@@ -392,9 +427,9 @@ public class ForkingTaskRunner
                         );
                       }
                       if (status.isSuccess()) {
-                        SUCCESSFUL_TASK_COUNT.incrementAndGet();
+                        successfulTaskCount.incrementAndGet();
                       } else {
-                        FAILED_TASK_COUNT.incrementAndGet();
+                        failedTaskCount.incrementAndGet();
                       }
                       TaskRunnerUtils.notifyStatusChanged(listeners, task.getId(), status);
                       return status;
@@ -718,9 +753,9 @@ public class ForkingTaskRunner
   @Override
   public Long getWorkerFailedTaskCount()
   {
-    long failedTaskCount = FAILED_TASK_COUNT.get();
-    long lastReportedFailedTaskCount = LAST_REPORTED_FAILED_TASK_COUNT.get();
-    LAST_REPORTED_FAILED_TASK_COUNT.set(failedTaskCount);
+    long failedTaskCount = this.failedTaskCount.get();
+    long lastReportedFailedTaskCount = this.lastReportedFailedTaskCount.get();
+    this.lastReportedFailedTaskCount.set(failedTaskCount);
     return failedTaskCount - lastReportedFailedTaskCount;
   }
 
@@ -757,9 +792,9 @@ public class ForkingTaskRunner
   @Override
   public Long getWorkerSuccessfulTaskCount()
   {
-    long successfulTaskCount = SUCCESSFUL_TASK_COUNT.get();
-    long lastReportedSuccessfulTaskCount = LAST_REPORTED_SUCCESSFUL_TASK_COUNT.get();
-    LAST_REPORTED_SUCCESSFUL_TASK_COUNT.set(successfulTaskCount);
+    long successfulTaskCount = this.successfulTaskCount.get();
+    long lastReportedSuccessfulTaskCount = this.lastReportedSuccessfulTaskCount.get();
+    this.lastReportedSuccessfulTaskCount.set(successfulTaskCount);
     return successfulTaskCount - lastReportedSuccessfulTaskCount;
   }
 

@@ -29,8 +29,10 @@ import org.apache.druid.query.UnionDataSource;
 import org.apache.druid.query.UnnestDataSource;
 import org.apache.druid.query.filter.DimFilter;
 import org.apache.druid.query.spec.QuerySegmentSpec;
+import org.apache.druid.segment.join.JoinPrefixUtils;
 
 import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -63,7 +65,7 @@ import java.util.Optional;
  * for the base or leaf datasources to include additional joins.
  *
  * The base datasource is the one that will be considered by the core Druid query stack for scanning via
- * {@link org.apache.druid.segment.Segment} and {@link org.apache.druid.segment.StorageAdapter}. The other leaf
+ * {@link org.apache.druid.segment.Segment} and {@link org.apache.druid.segment.CursorFactory}. The other leaf
  * datasources must be joinable onto the base data.
  *
  * The idea here is to keep things simple and dumb. So we focus only on identifying left-leaning join trees, which map
@@ -110,7 +112,7 @@ public class DataSourceAnalysis
   /**
    * If {@link #getBaseDataSource()} is a {@link TableDataSource}, returns it. Otherwise, returns an empty Optional.
    *
-   * Note that this can return empty even if {@link #isConcreteTableBased()} is true. This happens if the base
+   * Note that this can return empty even if {@link #isConcreteAndTableBased()} is true. This happens if the base
    * datasource is a {@link UnionDataSource} of {@link TableDataSource}.
    */
   public Optional<TableDataSource> getBaseTableDataSource()
@@ -175,11 +177,12 @@ public class DataSourceAnalysis
    * Else this method creates a new analysis object with the base query provided in the input
    *
    * @param query the query to add to the analysis if the baseQuery is null
+   *
    * @return the existing analysis if it has non-null basequery, else a new one with the updated base query
    */
   public DataSourceAnalysis maybeWithBaseQuery(Query<?> query)
   {
-    if (!getBaseQuery().isPresent()) {
+    if (!getBaseQuery().isPresent() && query instanceof BaseQuery) {
       return new DataSourceAnalysis(baseDataSource, query, joinBaseTableFilter, preJoinableClauses);
     }
     return this;
@@ -204,25 +207,38 @@ public class DataSourceAnalysis
   }
 
   /**
-   * Returns true if this datasource is concrete-based (see {@link #isConcreteBased()}, and the base datasource is a
-   * {@link TableDataSource} or a {@link UnionDataSource} composed entirely of {@link TableDataSource}
-   * or an {@link UnnestDataSource} composed entirely of {@link TableDataSource} . This is an
-   * important property, because it corresponds to datasources that can be handled by Druid's distributed query stack.
+   * Returns whether this datasource is one of:
+   *
+   * <ul>
+   *   <li>{@link TableDataSource}</li>
+   *   <li>{@link UnionDataSource} composed entirely of {@link TableDataSource}</li>
+   *   <li>{@link UnnestDataSource} composed entirely of {@link TableDataSource}</li>
+   * </ul>
    */
-  public boolean isConcreteTableBased()
+  public boolean isTableBased()
+  {
+    return (baseDataSource instanceof TableDataSource
+            || (baseDataSource instanceof UnionDataSource &&
+                baseDataSource.getChildren()
+                              .stream()
+                              .allMatch(ds -> ds instanceof TableDataSource))
+            || (baseDataSource instanceof UnnestDataSource &&
+                baseDataSource.getChildren()
+                              .stream()
+                              .allMatch(ds -> ds instanceof TableDataSource)));
+  }
+
+  /**
+   * Returns true if this datasource is both (see {@link #isConcreteBased()} and {@link #isTableBased()}.
+   * This is an important property, because it corresponds to datasources that can be handled by Druid's distributed
+   * query stack.
+   */
+  public boolean isConcreteAndTableBased()
   {
     // At the time of writing this comment, UnionDataSource children are required to be tables, so the instanceof
     // check is redundant. But in the future, we will likely want to support unions of things other than tables,
     // so check anyway for future-proofing.
-    return isConcreteBased() && (baseDataSource instanceof TableDataSource
-                                 || (baseDataSource instanceof UnionDataSource &&
-                                     baseDataSource.getChildren()
-                                                   .stream()
-                                                   .allMatch(ds -> ds instanceof TableDataSource))
-                                 || (baseDataSource instanceof UnnestDataSource &&
-                                     baseDataSource.getChildren()
-                                                   .stream()
-                                                   .allMatch(ds -> ds instanceof TableDataSource)));
+    return isConcreteBased() && isTableBased();
   }
 
   /**
@@ -231,6 +247,24 @@ public class DataSourceAnalysis
   public boolean isJoin()
   {
     return !preJoinableClauses.isEmpty();
+  }
+
+  /**
+   * Returns whether "column" on the analyzed datasource refers to a column from the base datasource.
+   */
+  public boolean isBaseColumn(final String column)
+  {
+    if (baseQuery != null) {
+      return false;
+    }
+
+    for (final PreJoinableClause clause : preJoinableClauses) {
+      if (JoinPrefixUtils.isPrefixedBy(column, clause.getPrefix())) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   @Override
@@ -260,5 +294,18 @@ public class DataSourceAnalysis
            ", baseQuery=" + baseQuery +
            ", preJoinableClauses=" + preJoinableClauses +
            '}';
+  }
+
+  /**
+   * {@link DataSource#isGlobal()}.
+   */
+  public boolean isGlobal()
+  {
+    for (PreJoinableClause preJoinableClause : preJoinableClauses) {
+      if (!preJoinableClause.getDataSource().isGlobal()) {
+        return false;
+      }
+    }
+    return baseDataSource.isGlobal();
   }
 }

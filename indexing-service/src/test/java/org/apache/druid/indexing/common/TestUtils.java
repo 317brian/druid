@@ -20,44 +20,40 @@
 package org.apache.druid.indexing.common;
 
 import com.fasterxml.jackson.databind.InjectableValues;
-import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableMap;
-import org.apache.druid.client.indexing.IndexingServiceClient;
-import org.apache.druid.client.indexing.NoopOverlordClient;
 import org.apache.druid.data.input.impl.NoopInputFormat;
 import org.apache.druid.data.input.impl.NoopInputSource;
 import org.apache.druid.guice.DruidSecondaryModule;
-import org.apache.druid.guice.FirehoseModule;
 import org.apache.druid.indexing.common.stats.DropwizardRowIngestionMetersFactory;
-import org.apache.druid.indexing.common.task.IndexTaskClientFactory;
 import org.apache.druid.indexing.common.task.TestAppenderatorsManager;
-import org.apache.druid.indexing.common.task.batch.parallel.ParallelIndexSupervisorTaskClientProvider;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.math.expr.ExprMacroTable;
 import org.apache.druid.query.expression.LookupEnabledTestExprMacroTable;
+import org.apache.druid.rpc.indexing.NoopOverlordClient;
 import org.apache.druid.rpc.indexing.OverlordClient;
 import org.apache.druid.segment.IndexIO;
 import org.apache.druid.segment.IndexMergerV9;
 import org.apache.druid.segment.IndexMergerV9Factory;
 import org.apache.druid.segment.TestHelper;
+import org.apache.druid.segment.column.ColumnConfig;
 import org.apache.druid.segment.incremental.RowIngestionMetersFactory;
 import org.apache.druid.segment.loading.LocalDataSegmentPuller;
 import org.apache.druid.segment.loading.LocalLoadSpec;
+import org.apache.druid.segment.realtime.ChatHandlerProvider;
+import org.apache.druid.segment.realtime.NoopChatHandlerProvider;
 import org.apache.druid.segment.realtime.appenderator.AppenderatorsManager;
-import org.apache.druid.segment.realtime.firehose.ChatHandlerProvider;
-import org.apache.druid.segment.realtime.firehose.NoopChatHandlerProvider;
 import org.apache.druid.segment.writeout.OffHeapMemorySegmentWriteOutMediumFactory;
 import org.apache.druid.server.security.AuthConfig;
 import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.timeline.DataSegment.PruneSpecsHolder;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -66,10 +62,6 @@ import java.util.concurrent.TimeUnit;
 public class TestUtils
 {
   public static final OverlordClient OVERLORD_SERVICE_CLIENT = new NoopOverlordClient();
-  public static final ParallelIndexSupervisorTaskClientProvider TASK_CLIENT_PROVIDER =
-      (supervisorTaskId, httpTimeout, numRetries) -> {
-        throw new UnsupportedOperationException();
-      };
   public static final AppenderatorsManager APPENDERATORS_MANAGER = new TestAppenderatorsManager();
 
   private static final Logger log = new Logger(TestUtils.class);
@@ -82,10 +74,7 @@ public class TestUtils
   public TestUtils()
   {
     this.jsonMapper = new DefaultObjectMapper();
-    indexIO = new IndexIO(
-        jsonMapper,
-        () -> 0
-    );
+    indexIO = new IndexIO(jsonMapper, ColumnConfig.DEFAULT);
     indexMergerV9Factory = new IndexMergerV9Factory(
         jsonMapper,
         indexIO,
@@ -104,11 +93,10 @@ public class TestUtils
             .addValue(AuthorizerMapper.class, null)
             .addValue(RowIngestionMetersFactory.class, rowIngestionMetersFactory)
             .addValue(PruneSpecsHolder.class, PruneSpecsHolder.DEFAULT)
-            .addValue(IndexingServiceClient.class, OVERLORD_SERVICE_CLIENT)
+            .addValue(OverlordClient.class, OVERLORD_SERVICE_CLIENT)
             .addValue(AuthorizerMapper.class, new AuthorizerMapper(ImmutableMap.of()))
             .addValue(AppenderatorsManager.class, APPENDERATORS_MANAGER)
             .addValue(LocalDataSegmentPuller.class, new LocalDataSegmentPuller())
-            .addValue(IndexTaskClientFactory.class, TASK_CLIENT_PROVIDER)
     );
 
     jsonMapper.registerModule(
@@ -126,9 +114,6 @@ public class TestUtils
         }
     );
     DruidSecondaryModule.setupAnnotationIntrospector(jsonMapper, TestHelper.makeAnnotationIntrospector());
-
-    List<? extends Module> firehoseModules = new FirehoseModule().getJacksonModules();
-    firehoseModules.forEach(jsonMapper::registerModule);
   }
 
   public ObjectMapper getTestObjectMapper()
@@ -178,5 +163,22 @@ public class TestUtils
       return false;
     }
     return true;
+  }
+
+  /**
+   * Converts the given JSON string which uses single quotes for field names and
+   * String values to a standard JSON by replacing all occurrences of a single
+   * quote with double quotes.
+   * <p>
+   * Single-quoted JSON is typically easier to read as can be seen below:
+   * <pre>
+   * final String singleQuotedJson = "{'f1':'value', 'f2':5}";
+   *
+   * final String doubleQuotedJson = "{\"f1\":\"value\", \"f2\":5}";
+   * </pre>
+   */
+  public static String singleQuoteToStandardJson(String singleQuotedJson)
+  {
+    return StringUtils.replaceChar(singleQuotedJson, '\'', "\"");
   }
 }

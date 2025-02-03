@@ -22,9 +22,6 @@ package org.apache.druid.segment.join;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import org.apache.druid.common.config.NullHandling;
-import org.apache.druid.common.config.NullHandlingTest;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.IAE;
 import org.apache.druid.java.util.common.Pair;
@@ -41,6 +38,7 @@ import org.apache.druid.segment.join.lookup.LookupJoinable;
 import org.apache.druid.segment.join.table.IndexedTable;
 import org.apache.druid.segment.join.table.IndexedTableJoinable;
 import org.apache.druid.segment.join.table.RowBasedIndexedTable;
+import org.apache.druid.testing.InitializedNullHandlingTest;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -48,13 +46,12 @@ import org.junit.rules.ExpectedException;
 import org.junit.rules.TemporaryFolder;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-public class JoinableFactoryWrapperTest extends NullHandlingTest
+public class JoinableFactoryWrapperTest extends InitializedNullHandlingTest
 {
   public static final JoinableFactoryWrapper NOOP_JOINABLE_FACTORY_WRAPPER = new JoinableFactoryWrapper(
       NoopJoinableFactory.INSTANCE
@@ -70,9 +67,7 @@ public class JoinableFactoryWrapperTest extends NullHandlingTest
                   .build();
 
   private static final Set<String> TEST_LOOKUP_KEYS =
-      NullHandling.sqlCompatible()
-      ? TEST_LOOKUP.keySet()
-      : Sets.difference(TEST_LOOKUP.keySet(), Collections.singleton(""));
+      TEST_LOOKUP.keySet();
 
   private static final InlineDataSource INDEXED_TABLE_DS = InlineDataSource.fromIterable(
       ImmutableList.of(

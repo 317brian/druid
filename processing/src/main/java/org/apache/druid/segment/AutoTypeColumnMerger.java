@@ -22,11 +22,12 @@ package org.apache.druid.segment;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
-import org.apache.druid.java.util.common.ISE;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.io.Closer;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.segment.column.ColumnDescriptor;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.ColumnTypeFactory;
 import org.apache.druid.segment.column.ValueType;
 import org.apache.druid.segment.data.FrontCodedIntArrayIndexedWriter;
 import org.apache.druid.segment.data.Indexed;
@@ -45,6 +46,7 @@ import org.apache.druid.segment.serde.NestedCommonFormatColumnPartSerde;
 import org.apache.druid.segment.writeout.SegmentWriteOutMedium;
 
 import javax.annotation.Nullable;
+import java.io.File;
 import java.io.IOException;
 import java.nio.ByteOrder;
 import java.nio.IntBuffer;
@@ -65,8 +67,7 @@ import java.util.TreeMap;
  */
 public class AutoTypeColumnMerger implements DimensionMergerV9
 {
-  private static final Logger log = new Logger(NestedDataColumnMerger.class);
-
+  private static final Logger log = new Logger(AutoTypeColumnMerger.class);
   public static final Comparator<PeekingIterator<String>> STRING_MERGING_COMPARATOR =
       SimpleDictionaryMergingIterator.makePeekingComparator();
   public static final Comparator<PeekingIterator<Long>> LONG_MERGING_COMPARATOR =
@@ -75,26 +76,49 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
       SimpleDictionaryMergingIterator.makePeekingComparator();
 
   private final String name;
+  private final String outputName;
   private final IndexSpec indexSpec;
   private final SegmentWriteOutMedium segmentWriteOutMedium;
   private final Closer closer;
   private NestedCommonFormatColumnSerializer serializer;
 
   private ColumnType logicalType;
+  @Nullable
+  private final ColumnType castToType;
   private boolean isVariantType = false;
-  private boolean hasOnlyNulls = false;
+  private byte variantTypeByte = 0x00;
 
+  private final File segmentBaseDir;
+
+  /**
+   * @param name                  column name
+   * @param outputName            output smoosh file name. if this is a base table column, it will be the equivalent to
+   *                              name, however if this merger is for a projection, this will be prefixed with the
+   *                              projection name so that multiple projections can store the same column name at
+   *                              different smoosh file "paths"
+   * @param castToType            optional mechanism to enforce that all values are a specific type
+   * @param indexSpec             segment level storage options such as compression format and bitmap type
+   * @param segmentWriteOutMedium temporary storage location to stage segment outputs before finalizing into the segment
+   * @param closer                resource closer if this merger needs to attach any closables that should be cleaned up
+   *                              when the segment is finished writing
+   */
   public AutoTypeColumnMerger(
       String name,
+      String outputName,
+      @Nullable ColumnType castToType,
       IndexSpec indexSpec,
       SegmentWriteOutMedium segmentWriteOutMedium,
+      File segmentBaseDir,
       Closer closer
   )
   {
 
     this.name = name;
+    this.outputName = outputName;
+    this.castToType = castToType;
     this.indexSpec = indexSpec;
     this.segmentWriteOutMedium = segmentWriteOutMedium;
+    this.segmentBaseDir = segmentBaseDir;
     this.closer = closer;
   }
 
@@ -113,6 +137,11 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
 
       final SortedMap<String, FieldTypeInfo.MutableTypeSet> mergedFields = new TreeMap<>();
 
+      boolean forceNested = false;
+      Object constantValue = null;
+      boolean hasArrays = false;
+      boolean isConstant = true;
+
       for (int i = 0; i < adapters.size(); i++) {
         final IndexableAdapter adapter = adapters.get(i);
         final IndexableAdapter.NestedColumnMergable mergable = closer.register(
@@ -121,35 +150,57 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
         if (mergable == null) {
           continue;
         }
+        forceNested = forceNested || mergable.isForceNestedType();
+        isConstant = isConstant && mergable.isConstant();
+        constantValue = mergable.getConstantValue();
+
         final SortedValueDictionary dimValues = mergable.getValueDictionary();
 
         boolean allNulls = dimValues == null || dimValues.allNull();
-        sortedLookup = dimValues;
         if (!allNulls) {
+          sortedLookup = dimValues;
           mergable.mergeFieldsInto(mergedFields);
           sortedLookups[i] = dimValues.getSortedStrings();
           sortedLongLookups[i] = dimValues.getSortedLongs();
           sortedDoubleLookups[i] = dimValues.getSortedDoubles();
           sortedArrayLookups[i] = dimValues.getSortedArrays();
+          hasArrays = sortedArrayLookups[i].size() > 0;
           numMergeIndex++;
         }
-      }
-
-      // no data, we don't need to write this column
-      if (numMergeIndex == 0 && mergedFields.size() == 0) {
-        hasOnlyNulls = true;
-        return;
       }
 
       // check to see if we can specialize the serializer after merging all the adapters
       final FieldTypeInfo.MutableTypeSet rootTypes = mergedFields.get(NestedPathFinder.JSON_PATH_ROOT);
       final boolean rootOnly = mergedFields.size() == 1 && rootTypes != null;
-      if (rootOnly && rootTypes.getSingleType() != null) {
-        logicalType = rootTypes.getSingleType();
+
+      final ColumnType explicitType;
+      if (castToType != null && (castToType.isPrimitive() || castToType.isPrimitiveArray())) {
+        explicitType = castToType;
+      } else {
+        explicitType = null;
+      }
+
+      // for backwards compat; remove this constant handling in druid 28 along with
+      // indexSpec.optimizeJsonConstantColumns in favor of always writing constant columns
+      // we also handle the numMergeIndex == 0 here, which also indicates that the column is a null constant
+      if (explicitType == null && !forceNested && ((isConstant && constantValue == null) || numMergeIndex == 0)) {
+        logicalType = ColumnType.STRING;
+        serializer = new ScalarStringColumnSerializer(
+            outputName,
+            indexSpec,
+            segmentWriteOutMedium,
+            closer
+        );
+      } else if (explicitType != null || (!forceNested && rootOnly && rootTypes.getSingleType() != null)) {
+        logicalType = explicitType != null ? explicitType : rootTypes.getSingleType();
+        // empty arrays can be missed since they don't have a type, so handle them here
+        if (!logicalType.isArray() && hasArrays) {
+          logicalType = ColumnTypeFactory.getInstance().ofArray(logicalType);
+        }
         switch (logicalType.getType()) {
           case LONG:
             serializer = new ScalarLongColumnSerializer(
-                name,
+                outputName,
                 indexSpec,
                 segmentWriteOutMedium,
                 closer
@@ -157,7 +208,7 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             break;
           case DOUBLE:
             serializer = new ScalarDoubleColumnSerializer(
-                name,
+                outputName,
                 indexSpec,
                 segmentWriteOutMedium,
                 closer
@@ -165,7 +216,7 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             break;
           case STRING:
             serializer = new ScalarStringColumnSerializer(
-                name,
+                outputName,
                 indexSpec,
                 segmentWriteOutMedium,
                 closer
@@ -173,7 +224,8 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             break;
           case ARRAY:
             serializer = new VariantColumnSerializer(
-                name,
+                outputName,
+                logicalType,
                 null,
                 indexSpec,
                 segmentWriteOutMedium,
@@ -181,22 +233,28 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             );
             break;
           default:
-            throw new ISE(
+            throw DruidException.defensive(
                 "How did we get here? Column [%s] with type [%s] does not have specialized serializer",
                 name,
                 logicalType
             );
         }
-      } else if (rootOnly) {
+      } else if (!forceNested && rootOnly) {
         // mixed type column, but only root path, we can use VariantArrayColumnSerializer
         // pick the least restrictive type for the logical type
         isVariantType = true;
+        variantTypeByte = rootTypes.getByteValue();
         for (ColumnType type : FieldTypeInfo.convertToSet(rootTypes.getByteValue())) {
           logicalType = ColumnType.leastRestrictiveType(logicalType, type);
         }
+        // empty arrays can be missed since they don't have a type, so handle them here
+        if (!logicalType.isArray() && hasArrays) {
+          logicalType = ColumnTypeFactory.getInstance().ofArray(logicalType);
+        }
         serializer = new VariantColumnSerializer(
-            name,
-            rootTypes.getByteValue(),
+            outputName,
+            null,
+            variantTypeByte,
             indexSpec,
             segmentWriteOutMedium,
             closer
@@ -204,16 +262,15 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
       } else {
         // all the bells and whistles
         logicalType = ColumnType.NESTED_DATA;
-        final NestedDataColumnSerializer defaultSerializer = new NestedDataColumnSerializer(
-            name,
+        serializer = new NestedDataColumnSerializer(
+            outputName,
             indexSpec,
             segmentWriteOutMedium,
             closer
         );
-        serializer = defaultSerializer;
       }
 
-      serializer.openDictionaryWriter();
+      serializer.openDictionaryWriter(segmentBaseDir);
       serializer.serializeFields(mergedFields);
 
       int stringCardinality;
@@ -227,7 +284,7 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
             sortedLookup.getSortedDoubles(),
             () -> new ArrayDictionaryMergingIterator(
                 sortedArrayLookups,
-                serializer.getGlobalLookup()
+                serializer.getDictionaryIdLookup()
             )
         );
         stringCardinality = sortedLookup.getStringCardinality();
@@ -249,7 +306,7 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
         );
         final ArrayDictionaryMergingIterator arrayIterator = new ArrayDictionaryMergingIterator(
             sortedArrayLookups,
-            serializer.getGlobalLookup()
+            serializer.getDictionaryIdLookup()
         );
         serializer.serializeDictionaries(
             () -> stringIterator,
@@ -307,26 +364,99 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
   @Override
   public boolean hasOnlyNulls()
   {
-    return hasOnlyNulls;
+    // we handle this internally using a constant column instead of using the generic null part serde
+    return false;
   }
 
   @Override
   public ColumnDescriptor makeColumnDescriptor()
   {
-    ColumnDescriptor.Builder descriptorBuilder = new ColumnDescriptor.Builder();
+    ColumnDescriptor.Builder descriptorBuilder = ColumnDescriptor.builder();
 
-    final NestedCommonFormatColumnPartSerde partSerde = NestedCommonFormatColumnPartSerde.serializerBuilder()
-                                                                                         .withLogicalType(logicalType)
-                                                                                         .withHasNulls(serializer.hasNulls())
-                                                                                         .isVariantType(isVariantType)
-                                                                                         .withByteOrder(ByteOrder.nativeOrder())
-                                                                                         .withBitmapSerdeFactory(indexSpec.getBitmapSerdeFactory())
-                                                                                         .withSerializer(serializer)
-                                                                                         .build();
+    final NestedCommonFormatColumnPartSerde partSerde =
+        NestedCommonFormatColumnPartSerde.serializerBuilder()
+                                         .withLogicalType(logicalType)
+                                         .withHasNulls(serializer.hasNulls())
+                                         .isVariantType(isVariantType)
+                                         .withEnforceLogicalType(castToType != null)
+                                         .withByteOrder(ByteOrder.nativeOrder())
+                                         .withBitmapSerdeFactory(indexSpec.getBitmapSerdeFactory())
+                                         .withSerializer(serializer)
+                                         .build();
     descriptorBuilder.setValueType(ValueType.COMPLEX) // this doesn't really matter... you could say.. its complicated..
                      .setHasMultipleValues(false)
                      .addSerde(partSerde);
     return descriptorBuilder.build();
+  }
+
+  protected DictionaryIdLookup getIdLookup()
+  {
+    return serializer.getDictionaryIdLookup();
+  }
+
+  @Override
+  public void attachParent(DimensionMergerV9 parent, List<IndexableAdapter> projectionAdapters) throws IOException
+  {
+    DruidException.conditionalDefensive(
+        parent instanceof AutoTypeColumnMerger,
+        "Projection parent dimension must be same type, got [%s]",
+        parent.getClass()
+    );
+    AutoTypeColumnMerger autoParent = (AutoTypeColumnMerger) parent;
+    logicalType = autoParent.logicalType;
+    isVariantType = autoParent.isVariantType;
+    if (autoParent.serializer instanceof ScalarStringColumnSerializer) {
+      serializer = new ScalarStringColumnSerializer(
+          outputName,
+          indexSpec,
+          segmentWriteOutMedium,
+          closer
+      );
+    } else if (autoParent.serializer instanceof ScalarLongColumnSerializer) {
+      serializer = new ScalarLongColumnSerializer(
+          outputName,
+          indexSpec,
+          segmentWriteOutMedium,
+          closer
+      );
+    } else if (autoParent.serializer instanceof ScalarDoubleColumnSerializer) {
+      serializer = new ScalarDoubleColumnSerializer(
+          outputName,
+          indexSpec,
+          segmentWriteOutMedium,
+          closer
+      );
+    } else if (autoParent.serializer instanceof VariantColumnSerializer) {
+      if (autoParent.isVariantType) {
+        serializer = new VariantColumnSerializer(
+            outputName,
+            null,
+            variantTypeByte,
+            indexSpec,
+            segmentWriteOutMedium,
+            closer
+        );
+      } else {
+        serializer = new VariantColumnSerializer(
+            outputName,
+            logicalType,
+            null,
+            indexSpec,
+            segmentWriteOutMedium,
+            closer
+        );
+      }
+    } else {
+      serializer = new NestedDataColumnSerializer(
+          outputName,
+          indexSpec,
+          segmentWriteOutMedium,
+          closer
+      );
+    }
+
+    serializer.setDictionaryIdLookup(autoParent.getIdLookup());
+    serializer.open();
   }
 
   public static class ArrayDictionaryMergingIterator implements Iterator<int[]>
@@ -407,11 +537,6 @@ public class AutoTypeColumnMerger implements DimensionMergerV9
       return counter;
     }
 
-    @Override
-    public void remove()
-    {
-      throw new UnsupportedOperationException("remove");
-    }
   }
 
   public static class IdLookupArrayIterator implements Iterator<int[]>

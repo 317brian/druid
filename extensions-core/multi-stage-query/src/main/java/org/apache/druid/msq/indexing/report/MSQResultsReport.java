@@ -24,10 +24,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.druid.java.util.common.guava.Sequences;
-import org.apache.druid.java.util.common.guava.Yielder;
-import org.apache.druid.java.util.common.guava.Yielders;
+import org.apache.druid.common.config.Configs;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.RowSignature;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -36,36 +35,27 @@ import java.util.Objects;
 public class MSQResultsReport
 {
   /**
-   * Like {@link org.apache.druid.segment.column.RowSignature}, but allows duplicate column names for compatibility
+   * Like {@link RowSignature}, but allows duplicate column names for compatibility
    * with SQL (which also allows duplicate column names in query results).
    */
   private final List<ColumnAndType> signature;
   @Nullable
   private final List<SqlTypeName> sqlTypeNames;
-  private final Yielder<Object[]> resultYielder;
+  private final List<Object[]> results;
+  private final boolean resultsTruncated;
 
+  @JsonCreator
   public MSQResultsReport(
-      final List<ColumnAndType> signature,
-      @Nullable final List<SqlTypeName> sqlTypeNames,
-      final Yielder<Object[]> resultYielder
+      @JsonProperty("signature") final List<ColumnAndType> signature,
+      @JsonProperty("sqlTypeNames") @Nullable final List<SqlTypeName> sqlTypeNames,
+      @JsonProperty("results") final List<Object[]> results,
+      @JsonProperty("resultsTruncated") final Boolean resultsTruncated
   )
   {
     this.signature = Preconditions.checkNotNull(signature, "signature");
     this.sqlTypeNames = sqlTypeNames;
-    this.resultYielder = Preconditions.checkNotNull(resultYielder, "resultYielder");
-  }
-
-  /**
-   * Method that enables Jackson deserialization.
-   */
-  @JsonCreator
-  static MSQResultsReport fromJson(
-      @JsonProperty("signature") final List<ColumnAndType> signature,
-      @JsonProperty("sqlTypeNames") @Nullable final List<SqlTypeName> sqlTypeNames,
-      @JsonProperty("results") final List<Object[]> results
-  )
-  {
-    return new MSQResultsReport(signature, sqlTypeNames, Yielders.each(Sequences.simple(results)));
+    this.results = Preconditions.checkNotNull(results, "results");
+    this.resultsTruncated = Configs.valueOrDefault(resultsTruncated, false);
   }
 
   @JsonProperty("signature")
@@ -83,9 +73,15 @@ public class MSQResultsReport
   }
 
   @JsonProperty("results")
-  public Yielder<Object[]> getResultYielder()
+  public List<Object[]> getResults()
   {
-    return resultYielder;
+    return results;
+  }
+
+  @JsonProperty("resultsTruncated")
+  public boolean isResultsTruncated()
+  {
+    return resultsTruncated;
   }
 
   public static class ColumnAndType
@@ -139,6 +135,19 @@ public class MSQResultsReport
     public String toString()
     {
       return name + ":" + type;
+    }
+
+    public static RowSignature toRowSignature(List<ColumnAndType> columnAndTypes)
+    {
+      final RowSignature.Builder builder = RowSignature.builder();
+      for (MSQResultsReport.ColumnAndType columnAndType : columnAndTypes) {
+        builder.add(columnAndType.getName(), columnAndType.getType());
+      }
+      RowSignature rowSignature = builder.build();
+      if (rowSignature.size() != columnAndTypes.size()) {
+        throw new IllegalArgumentException("Duplicate column names are not allowed in RowSignature");
+      }
+      return rowSignature;
     }
   }
 }

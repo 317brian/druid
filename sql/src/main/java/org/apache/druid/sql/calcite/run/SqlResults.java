@@ -27,28 +27,26 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.NlsString;
-import org.apache.druid.common.config.NullHandling;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.DateTimes;
-import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.math.expr.Evals;
 import org.apache.druid.segment.DimensionHandlerUtils;
-import org.apache.druid.segment.data.ComparableList;
-import org.apache.druid.segment.data.ComparableStringArray;
 import org.apache.druid.sql.calcite.planner.Calcites;
 import org.apache.druid.sql.calcite.planner.PlannerContext;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
-import java.io.IOException;
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * Holder for the utility method {@link #coerce(ObjectMapper, Context, Object, SqlTypeName)}.
+ * Holder for the utility method {@link #coerce(ObjectMapper, Context, Object, SqlTypeName, String)}.
  */
 public class SqlResults
 {
@@ -56,49 +54,54 @@ public class SqlResults
       final ObjectMapper jsonMapper,
       final Context context,
       final Object value,
-      final SqlTypeName sqlTypeName
+      final SqlTypeName sqlTypeName,
+      final String fieldName
   )
   {
     final Object coercedValue;
 
     if (SqlTypeName.CHAR_TYPES.contains(sqlTypeName)) {
       if (value == null || value instanceof String) {
-        coercedValue = NullHandling.nullToEmptyIfNeeded((String) value);
+        coercedValue = value;
       } else if (value instanceof NlsString) {
         coercedValue = ((NlsString) value).getValue();
       } else if (value instanceof Number) {
         coercedValue = String.valueOf(value);
       } else if (value instanceof Boolean) {
         coercedValue = String.valueOf(value);
-      } else if (value instanceof Collection) {
-        // Iterate through the collection, coercing each value. Useful for handling selects of multi-value dimensions.
-        final List<String> valueStrings =
-            ((Collection<?>) value).stream()
-                                   .map(v -> (String) coerce(jsonMapper, context, v, sqlTypeName))
-                                   .collect(Collectors.toList());
-
-        try {
-          coercedValue = jsonMapper.writeValueAsString(valueStrings);
-        }
-        catch (IOException e) {
-          throw new RuntimeException(e);
-        }
       } else {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        final Object maybeList = coerceArrayToList(value, false);
+
+        // Check if "maybeList" was originally a Collection of some kind, or was able to be coerced to one.
+        // Then Iterate through the collection, coercing each value. Useful for handling multi-value dimensions.
+        if (maybeList instanceof Collection) {
+          final List<String> valueStrings =
+              ((Collection<?>) maybeList)
+                  .stream()
+                  .map(v -> (String) coerce(jsonMapper, context, v, sqlTypeName, fieldName))
+                  .collect(Collectors.toList());
+
+          // Must stringify since the caller is expecting CHAR_TYPES.
+          coercedValue = coerceUsingObjectMapper(jsonMapper, valueStrings, sqlTypeName, fieldName);
+        } else {
+          throw cannotCoerce(value, sqlTypeName, fieldName);
+        }
       }
     } else if (value == null) {
       coercedValue = null;
     } else if (sqlTypeName == SqlTypeName.DATE) {
-      return Calcites.jodaToCalciteDate(coerceDateTime(value, sqlTypeName), context.getTimeZone());
+      return Calcites.jodaToCalciteDate(coerceDateTime(value, sqlTypeName, fieldName), context.getTimeZone());
     } else if (sqlTypeName == SqlTypeName.TIMESTAMP) {
-      return Calcites.jodaToCalciteTimestamp(coerceDateTime(value, sqlTypeName), context.getTimeZone());
+      return Calcites.jodaToCalciteTimestamp(coerceDateTime(value, sqlTypeName, fieldName), context.getTimeZone());
     } else if (sqlTypeName == SqlTypeName.BOOLEAN) {
-      if (value instanceof String) {
+      if (value instanceof Boolean) {
+        coercedValue = value;
+      } else if (value instanceof String) {
         coercedValue = Evals.asBoolean(((String) value));
       } else if (value instanceof Number) {
         coercedValue = Evals.asBoolean(((Number) value).longValue());
       } else {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        throw cannotCoerce(value, sqlTypeName, fieldName);
       }
     } else if (sqlTypeName == SqlTypeName.INTEGER) {
       if (value instanceof String) {
@@ -106,74 +109,60 @@ public class SqlResults
       } else if (value instanceof Number) {
         coercedValue = ((Number) value).intValue();
       } else {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        throw cannotCoerce(value, sqlTypeName, fieldName);
       }
     } else if (sqlTypeName == SqlTypeName.BIGINT) {
       try {
-        coercedValue = DimensionHandlerUtils.convertObjectToLong(value);
+        coercedValue = DimensionHandlerUtils.convertObjectToLong(value, fieldName);
       }
       catch (Exception e) {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        throw cannotCoerce(value, sqlTypeName, fieldName);
       }
     } else if (sqlTypeName == SqlTypeName.FLOAT) {
       try {
-        coercedValue = DimensionHandlerUtils.convertObjectToFloat(value);
+        coercedValue = DimensionHandlerUtils.convertObjectToFloat(value, fieldName);
       }
       catch (Exception e) {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        throw cannotCoerce(value, sqlTypeName, fieldName);
       }
     } else if (SqlTypeName.FRACTIONAL_TYPES.contains(sqlTypeName)) {
       try {
-        coercedValue = DimensionHandlerUtils.convertObjectToDouble(value);
+        coercedValue = DimensionHandlerUtils.convertObjectToDouble(value, fieldName);
       }
       catch (Exception e) {
-        throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+        throw cannotCoerce(value, sqlTypeName, fieldName);
       }
     } else if (sqlTypeName == SqlTypeName.OTHER) {
-      // Complex type, try to serialize if we should, else print class name
-      if (context.isSerializeComplexValues()) {
-        try {
-          coercedValue = jsonMapper.writeValueAsString(value);
-        }
-        catch (JsonProcessingException jex) {
-          throw new ISE(jex, "Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
-        }
-      } else {
-        coercedValue = value.getClass().getName();
-      }
+      coercedValue = coerceUsingObjectMapper(jsonMapper, value, sqlTypeName, fieldName);
     } else if (sqlTypeName == SqlTypeName.ARRAY) {
       if (context.isStringifyArrays()) {
         if (value instanceof String) {
-          coercedValue = NullHandling.nullToEmptyIfNeeded((String) value);
+          coercedValue = value;
         } else if (value instanceof NlsString) {
           coercedValue = ((NlsString) value).getValue();
         } else {
-          try {
-            coercedValue = jsonMapper.writeValueAsString(value);
-          }
-          catch (IOException e) {
-            throw new RuntimeException(e);
-          }
+          coercedValue = coerceUsingObjectMapper(jsonMapper, value, sqlTypeName, fieldName);
         }
       } else {
         // the protobuf jdbc handler prefers lists (it actually can't handle java arrays as sql arrays, only java lists)
         // the json handler could handle this just fine, but it handles lists as sql arrays as well so just convert
         // here if needed
-        coercedValue = maybeCoerceArrayToList(value, true);
-        if (coercedValue == null) {
-          throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
-        }
+        coercedValue = coerceArrayToList(value, true);
       }
     } else {
-      throw new ISE("Cannot coerce [%s] to %s", value.getClass().getName(), sqlTypeName);
+      throw cannotCoerce(value, sqlTypeName, fieldName);
     }
 
     return coercedValue;
   }
 
-
+  /**
+   * Attempt to coerce a value to {@link List}. If it cannot be coerced, either return the original value (if mustCoerce
+   * is false) or return the value as a single element list (if mustCoerce is true).
+   */
   @VisibleForTesting
-  static Object maybeCoerceArrayToList(Object value, boolean mustCoerce)
+  @Nullable
+  static Object coerceArrayToList(Object value, boolean mustCoerce)
   {
     if (value instanceof List) {
       return value;
@@ -187,7 +176,7 @@ public class SqlResults
       final Object[] array = (Object[]) value;
       final ArrayList<Object> lst = new ArrayList<>(array.length);
       for (Object o : array) {
-        lst.add(maybeCoerceArrayToList(o, false));
+        lst.add(coerceArrayToList(o, false));
       }
       return lst;
     } else if (value instanceof long[]) {
@@ -201,17 +190,13 @@ public class SqlResults
         lst.add(f);
       }
       return lst;
-    } else if (value instanceof ComparableStringArray) {
-      return Arrays.asList(((ComparableStringArray) value).getDelegate());
-    } else if (value instanceof ComparableList) {
-      return ((ComparableList) value).getDelegate();
     } else if (mustCoerce) {
-      return null;
+      return Collections.singletonList(value);
     }
     return value;
   }
 
-  private static DateTime coerceDateTime(Object value, SqlTypeName sqlType)
+  private static DateTime coerceDateTime(final Object value, final SqlTypeName sqlType, final String fieldName)
   {
     final DateTime dateTime;
 
@@ -222,29 +207,73 @@ public class SqlResults
     } else if (value instanceof DateTime) {
       dateTime = (DateTime) value;
     } else {
-      throw new ISE("Cannot coerce[%s] to %s", value.getClass().getName(), sqlType);
+      throw cannotCoerce(value, sqlType, fieldName);
     }
     return dateTime;
   }
 
+  private static String coerceUsingObjectMapper(
+      final ObjectMapper jsonMapper,
+      final Object value,
+      final SqlTypeName sqlTypeName,
+      final String fieldName
+  )
+  {
+    try {
+      return jsonMapper.writeValueAsString(value);
+    }
+    catch (JsonProcessingException e) {
+      throw cannotCoerce(e, value, sqlTypeName, fieldName);
+    }
+  }
+
+  private static DruidException cannotCoerce(final Throwable t, final Object value, final SqlTypeName sqlTypeName, final String fieldName)
+  {
+    return DruidException.forPersona(DruidException.Persona.USER)
+                         .ofCategory(DruidException.Category.INVALID_INPUT)
+                         .build(
+                             t,
+                             "Cannot coerce field [%s] from type [%s] to type [%s]",
+                             fieldName,
+                             value == null
+                             ? "unknown"
+                             : mapPriveArrayClassNameToReadableStrings(value.getClass().getName()),
+                             sqlTypeName
+                         );
+  }
+
+  private static String mapPriveArrayClassNameToReadableStrings(String name)
+  {
+    switch (name) {
+      case "[B":
+        return "Byte Array";
+      case "[Z":
+        return "Boolean Array";
+      default:
+        return name;
+    }
+  }
+
+  private static DruidException cannotCoerce(final Object value, final SqlTypeName sqlTypeName, final String fieldName)
+  {
+    return cannotCoerce(null, value, sqlTypeName, fieldName);
+  }
+
   /**
-   * Context for {@link #coerce(ObjectMapper, Context, Object, SqlTypeName)}
+   * Context for {@link #coerce(ObjectMapper, Context, Object, SqlTypeName, String)}
    */
   public static class Context
   {
     private final DateTimeZone timeZone;
-    private final boolean serializeComplexValues;
     private final boolean stringifyArrays;
 
     @JsonCreator
     public Context(
         @JsonProperty("timeZone") final DateTimeZone timeZone,
-        @JsonProperty("serializeComplexValues") final boolean serializeComplexValues,
         @JsonProperty("stringifyArrays") final boolean stringifyArrays
     )
     {
       this.timeZone = timeZone;
-      this.serializeComplexValues = serializeComplexValues;
       this.stringifyArrays = stringifyArrays;
     }
 
@@ -252,7 +281,6 @@ public class SqlResults
     {
       return new Context(
           plannerContext.getTimeZone(),
-          plannerContext.getPlannerConfig().shouldSerializeComplexValues(),
           plannerContext.isStringifyArrays()
       );
     }
@@ -261,12 +289,6 @@ public class SqlResults
     public DateTimeZone getTimeZone()
     {
       return timeZone;
-    }
-
-    @JsonProperty
-    public boolean isSerializeComplexValues()
-    {
-      return serializeComplexValues;
     }
 
     @JsonProperty
@@ -285,15 +307,14 @@ public class SqlResults
         return false;
       }
       Context context = (Context) o;
-      return serializeComplexValues == context.serializeComplexValues
-             && stringifyArrays == context.stringifyArrays
+      return stringifyArrays == context.stringifyArrays
              && Objects.equals(timeZone, context.timeZone);
     }
 
     @Override
     public int hashCode()
     {
-      return Objects.hash(timeZone, serializeComplexValues, stringifyArrays);
+      return Objects.hash(timeZone, stringifyArrays);
     }
 
     @Override
@@ -301,7 +322,6 @@ public class SqlResults
     {
       return "Context{" +
              "timeZone=" + timeZone +
-             ", serializeComplexValues=" + serializeComplexValues +
              ", stringifyArrays=" + stringifyArrays +
              '}';
     }

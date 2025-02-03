@@ -22,20 +22,18 @@ package org.apache.druid.sql.http;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.inject.Inject;
-import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.druid.common.exception.SanitizableException;
 import org.apache.druid.guice.annotations.NativeQuery;
 import org.apache.druid.guice.annotations.Self;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.logger.Logger;
-import org.apache.druid.query.QueryInterruptedException;
 import org.apache.druid.server.DruidNode;
 import org.apache.druid.server.QueryResource;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.server.QueryResultPusher;
 import org.apache.druid.server.ResponseContextConfig;
 import org.apache.druid.server.initialization.ServerConfig;
-import org.apache.druid.server.security.Access;
+import org.apache.druid.server.security.AuthorizationResult;
 import org.apache.druid.server.security.AuthorizationUtils;
 import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ResourceAction;
@@ -43,7 +41,6 @@ import org.apache.druid.sql.DirectStatement.ResultSet;
 import org.apache.druid.sql.HttpStatement;
 import org.apache.druid.sql.SqlLifecycleManager;
 import org.apache.druid.sql.SqlLifecycleManager.Cancelable;
-import org.apache.druid.sql.SqlPlanningException;
 import org.apache.druid.sql.SqlRowTransformer;
 import org.apache.druid.sql.SqlStatementFactory;
 
@@ -85,7 +82,7 @@ public class SqlResource
   private final DruidNode selfNode;
 
   @Inject
-  SqlResource(
+  protected SqlResource(
       final ObjectMapper jsonMapper,
       final AuthorizerMapper authorizerMapper,
       final @NativeQuery SqlStatementFactory sqlStatementFactory,
@@ -102,7 +99,6 @@ public class SqlResource
     this.serverConfig = Preconditions.checkNotNull(serverConfig, "serverConfig");
     this.responseContextConfig = responseContextConfig;
     this.selfNode = selfNode;
-
   }
 
   @POST
@@ -144,21 +140,9 @@ public class SqlResource
       return Response.status(Status.NOT_FOUND).build();
     }
 
-    // Considers only datasource and table resources; not context
-    // key resources when checking permissions. This means that a user's
-    // permission to cancel a query depends on the datasource, not the
-    // context variables used in the query.
-    Set<ResourceAction> resources = lifecycles
-        .stream()
-        .flatMap(lifecycle -> lifecycle.resources().stream())
-        .collect(Collectors.toSet());
-    Access access = AuthorizationUtils.authorizeAllResourceActions(
-        req,
-        resources,
-        authorizerMapper
-    );
+    final AuthorizationResult authResult = authorizeCancellation(req, lifecycles);
 
-    if (access.isAllowed()) {
+    if (authResult.allowAccessWithNoRestriction()) {
       // should remove only the lifecycles in the snapshot.
       sqlLifecycleManager.removeAll(sqlQueryId, lifecycles);
       lifecycles.forEach(Cancelable::cancel);
@@ -177,25 +161,21 @@ public class SqlResource
     @Override
     public void incrementSuccess()
     {
-
     }
 
     @Override
     public void incrementFailed()
     {
-
     }
 
     @Override
     public void incrementInterrupted()
     {
-
     }
 
     @Override
     public void incrementTimedOut()
     {
-
     }
   }
 
@@ -214,7 +194,6 @@ public class SqlResource
 
   private class SqlResourceQueryResultPusher extends QueryResultPusher
   {
-
     private final String sqlQueryId;
     private final HttpStatement stmt;
     private final SqlQuery sqlQuery;
@@ -229,9 +208,9 @@ public class SqlResource
     {
       super(
           req,
-          SqlResource.this.jsonMapper,
-          SqlResource.this.responseContextConfig,
-          SqlResource.this.selfNode,
+          jsonMapper,
+          responseContextConfig,
+          selfNode,
           SqlResource.QUERY_METRIC_COUNTER,
           sqlQueryId,
           MediaType.APPLICATION_JSON_TYPE,
@@ -254,28 +233,9 @@ public class SqlResource
         @Nullable
         public Response.ResponseBuilder start()
         {
-          try {
-            thePlan = stmt.plan();
-            queryResponse = thePlan.run();
-            return null;
-          }
-          catch (RelOptPlanner.CannotPlanException e) {
-            throw new SqlPlanningException(
-                SqlPlanningException.PlanningError.UNSUPPORTED_SQL_ERROR,
-                e.getMessage()
-            );
-          }
-          // There is a claim that Calcite sometimes throws a java.lang.AssertionError, but we do not have a test that can
-          // reproduce it checked into the code (the best we have is something that uses mocks to throw an Error, which is
-          // dubious at best).  We keep this just in case, but it might be best to remove it and see where the
-          // AssertionErrors are coming from and do something to ensure that they don't actually make it out of Calcite
-          catch (AssertionError e) {
-            log.warn(e, "AssertionError killed query: %s", sqlQuery);
-
-            // We wrap the exception here so that we get the sanitization.  java.lang.AssertionError apparently
-            // doesn't implement org.apache.druid.common.exception.SanitizableException.
-            throw new QueryInterruptedException(e);
-          }
+          thePlan = stmt.plan();
+          queryResponse = thePlan.run();
+          return null;
         }
 
         @Override
@@ -368,6 +328,24 @@ public class SqlResource
       }
       out.write(jsonMapper.writeValueAsBytes(ex));
     }
+  }
 
+  /**
+   * Authorize a query cancellation operation.
+   * <p>
+   * Considers only datasource and table resources; not context key resources when checking permissions. This means
+   * that a user's permission to cancel a query depends on the datasource, not the context variables used in the query.
+   */
+  public AuthorizationResult authorizeCancellation(final HttpServletRequest req, final List<Cancelable> cancelables)
+  {
+    Set<ResourceAction> resources = cancelables
+        .stream()
+        .flatMap(lifecycle -> lifecycle.resources().stream())
+        .collect(Collectors.toSet());
+    return AuthorizationUtils.authorizeAllResourceActions(
+        req,
+        resources,
+        authorizerMapper
+    );
   }
 }

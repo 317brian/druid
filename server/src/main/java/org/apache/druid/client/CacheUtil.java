@@ -34,6 +34,8 @@ import java.nio.ByteBuffer;
 
 public class CacheUtil
 {
+  private static final String RESULT_CACHE_NS = "RES";
+
   public enum ServerType
   {
     BROKER {
@@ -57,18 +59,9 @@ public class CacheUtil
     abstract boolean willMergeRunners();
   }
 
-  public static Cache.NamedKey computeResultLevelCacheKey(String resultLevelCacheIdentifier)
+  public static Cache.NamedKey computeResultLevelCacheKey(byte[] resultLevelCacheIdentifier)
   {
-    return new Cache.NamedKey(resultLevelCacheIdentifier, StringUtils.toUtf8(resultLevelCacheIdentifier));
-  }
-
-  public static void populateResultCache(
-      Cache cache,
-      Cache.NamedKey key,
-      byte[] resultBytes
-  )
-  {
-    cache.put(key, resultBytes);
+    return new Cache.NamedKey(RESULT_CACHE_NS, resultLevelCacheIdentifier);
   }
 
   public static Cache.NamedKey computeSegmentCacheKey(
@@ -110,7 +103,7 @@ public class CacheUtil
   {
     return cacheConfig.isUseCache()
            && query.context().isUseCache()
-           && isQueryCacheable(query, cacheStrategy, cacheConfig, serverType);
+           && isQueryCacheable(query, cacheStrategy, cacheConfig, serverType, true);
   }
 
   /**
@@ -128,7 +121,7 @@ public class CacheUtil
       ServerType serverType
   )
   {
-    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType)
+    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType, true)
            && query.context().isPopulateCache()
            && cacheConfig.isPopulateCache();
   }
@@ -148,7 +141,7 @@ public class CacheUtil
       ServerType serverType
   )
   {
-    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType)
+    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType, false)
            && query.context().isUseResultLevelCache()
            && cacheConfig.isUseResultLevelCache();
   }
@@ -168,7 +161,7 @@ public class CacheUtil
       ServerType serverType
   )
   {
-    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType)
+    return isQueryCacheable(query, cacheStrategy, cacheConfig, serverType, false)
            && query.context().isPopulateResultLevelCache()
            && cacheConfig.isPopulateResultLevelCache();
   }
@@ -181,16 +174,18 @@ public class CacheUtil
    * @param cacheStrategy result of {@link QueryToolChest#getCacheStrategy} on this query
    * @param cacheConfig   current active cache config
    * @param serverType    BROKER or DATA
+   * @param bySegment     segement level or result-level cache
    */
   static <T> boolean isQueryCacheable(
       final Query<T> query,
       @Nullable final CacheStrategy<T, Object, Query<T>> cacheStrategy,
       final CacheConfig cacheConfig,
-      final ServerType serverType
+      final ServerType serverType,
+      final boolean bySegment
   )
   {
     return cacheStrategy != null
-           && cacheStrategy.isCacheable(query, serverType.willMergeRunners())
+           && cacheStrategy.isCacheable(query, serverType.willMergeRunners(), bySegment)
            && cacheConfig.isQueryCacheable(query)
            && query.getDataSource().isCacheable(serverType == ServerType.BROKER);
   }

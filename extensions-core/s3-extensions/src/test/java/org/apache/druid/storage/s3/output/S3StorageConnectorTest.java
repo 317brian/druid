@@ -19,110 +19,147 @@
 
 package org.apache.druid.storage.s3.output;
 
+import com.amazonaws.ClientConfigurationFactory;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.client.builder.AwsClientBuilder;
+import com.amazonaws.internal.StaticCredentialsProvider;
 import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.DeleteObjectsRequest;
-import com.amazonaws.services.s3.model.GetObjectRequest;
-import com.amazonaws.services.s3.model.ListObjectsV2Request;
-import com.amazonaws.services.s3.model.ListObjectsV2Result;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.model.AmazonS3Exception;
+import com.amazonaws.services.s3.model.CreateBucketRequest;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import org.apache.druid.java.util.common.HumanReadableBytes;
+import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.java.util.metrics.StubServiceEmitter;
+import org.apache.druid.query.DruidProcessingConfigTest;
 import org.apache.druid.storage.StorageConnector;
-import org.apache.druid.storage.s3.NoopServerSideEncryption;
 import org.apache.druid.storage.s3.ServerSideEncryptingAmazonS3;
-import org.easymock.Capture;
-import org.easymock.EasyMock;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.containers.MinIOContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.UUID;
 
+import static org.apache.druid.storage.s3.output.S3StorageConnector.JOINER;
+
+@Testcontainers
+@Tag("requires-dockerd")
 public class S3StorageConnectorTest
 {
-  private static final AmazonS3Client S3_CLIENT = EasyMock.createMock(AmazonS3Client.class);
-  private static final ServerSideEncryptingAmazonS3 SERVICE = new ServerSideEncryptingAmazonS3(
-      S3_CLIENT,
-      new NoopServerSideEncryption()
-  );
-
-  private static final String BUCKET = "BUCKET";
+  private static final String BUCKET = "testbucket";
   private static final String PREFIX = "P/R/E/F/I/X";
   public static final String TEST_FILE = "test.csv";
-
-  @Rule
-  public TemporaryFolder temporaryFolder = new TemporaryFolder();
-
-  public static final ListObjectsV2Result TEST_RESULT = EasyMock.createMock(ListObjectsV2Result.class);
-
+  @Container
+  private static final MinIOContainer MINIO = MinioUtil.createContainer();
+  @TempDir
+  public static File temporaryFolder;
+  private ServerSideEncryptingAmazonS3 s3Client;
 
   private StorageConnector storageConnector;
 
-  @Before
-  public void setup()
+  @BeforeEach
+  public void setup() throws IOException
   {
-    try {
-      storageConnector = new S3StorageConnector(new S3OutputConfig(
-          BUCKET,
-          PREFIX,
-          temporaryFolder.newFolder(),
-          null,
-          null,
-          true
-      ), SERVICE);
+    s3Client = MinioUtil.createS3Client(MINIO);
+    if (!s3Client.getAmazonS3().doesBucketExistV2(BUCKET)) {
+      s3Client.getAmazonS3().createBucket(new CreateBucketRequest(BUCKET));
     }
-    catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
 
+    S3OutputConfig s3OutputConfig = new S3OutputConfig(
+        BUCKET,
+        PREFIX,
+        Files.createDirectory(Paths.get(temporaryFolder.getAbsolutePath(), UUID.randomUUID().toString())).toFile(),
+        null,
+        null,
+        true
+    );
+    storageConnector = new S3StorageConnector(
+        s3OutputConfig,
+        s3Client,
+        new S3UploadManager(
+            s3OutputConfig,
+            new S3ExportConfig("tempDir", new HumanReadableBytes("5MiB"), 1, null),
+            new DruidProcessingConfigTest.MockRuntimeInfo(10, 0, 0),
+            new StubServiceEmitter()
+        )
+    );
+  }
 
   @Test
-  public void pathExists() throws IOException
+  public void pathExists_yes() throws IOException
   {
-    EasyMock.reset(S3_CLIENT);
-    EasyMock.expect(S3_CLIENT.doesObjectExist(BUCKET, PREFIX + "/" + TEST_FILE)).andReturn(true);
-    EasyMock.replay(S3_CLIENT);
-    Assert.assertTrue(storageConnector.pathExists(TEST_FILE));
-    EasyMock.reset(S3_CLIENT);
-    Assert.assertFalse(storageConnector.pathExists("test1.csv"));
+    s3Client.putObject(
+        BUCKET,
+        JOINER.join(PREFIX, TEST_FILE),
+        Files.createFile(Path.of(temporaryFolder.toPath().toString(), TEST_FILE)).toFile()
+    );
+    Assertions.assertTrue(storageConnector.pathExists(TEST_FILE));
   }
 
+  @Test
+  public void pathExists_notFound() throws IOException
+  {
+    Assertions.assertFalse(storageConnector.pathExists(UUID.randomUUID().toString()));
+  }
+
+  @Test
+  public void pathExists_error() throws IOException
+  {
+    S3OutputConfig s3OutputConfig = new S3OutputConfig(
+        BUCKET,
+        PREFIX,
+        Files.createDirectory(Paths.get(temporaryFolder.getAbsolutePath(), UUID.randomUUID().toString())).toFile(),
+        null,
+        null,
+        true
+    );
+    StorageConnector unauthorizedStorageConnector = new S3StorageConnector(
+        s3OutputConfig,
+        MinioUtil.createUnauthorizedS3Client(MINIO),
+        new S3UploadManager(
+            s3OutputConfig,
+            new S3ExportConfig("tempDir", new HumanReadableBytes("5MiB"), 1, null),
+            new DruidProcessingConfigTest.MockRuntimeInfo(10, 0, 0),
+            new StubServiceEmitter()
+        )
+    );
+    final IOException e2 = Assertions.assertThrows(
+        IOException.class,
+        () -> unauthorizedStorageConnector.pathExists(TEST_FILE)
+    );
+    Assertions.assertEquals(AmazonS3Exception.class, e2.getCause().getClass());
+    AmazonS3Exception amazonS3Exception = (AmazonS3Exception) e2.getCause();
+    Assertions.assertEquals(403, amazonS3Exception.getStatusCode());
+  }
 
   @Test
   public void pathRead() throws IOException
   {
-    EasyMock.reset(S3_CLIENT);
-    ObjectMetadata objectMetadata = new ObjectMetadata();
-    long contentLength = "test".getBytes(StandardCharsets.UTF_8).length;
-    objectMetadata.setContentLength(contentLength);
-    S3Object s3Object = new S3Object();
-    s3Object.setObjectContent(new ByteArrayInputStream("test".getBytes(StandardCharsets.UTF_8)));
-    EasyMock.expect(S3_CLIENT.getObjectMetadata(EasyMock.anyObject())).andReturn(objectMetadata);
-    EasyMock.expect(S3_CLIENT.getObject(
-        new GetObjectRequest(BUCKET, PREFIX + "/" + TEST_FILE).withRange(0, contentLength - 1))
-    ).andReturn(s3Object);
-    EasyMock.replay(S3_CLIENT);
-
-    String readText = new BufferedReader(
-        new InputStreamReader(storageConnector.read(TEST_FILE), StandardCharsets.UTF_8))
-        .lines()
-        .collect(Collectors.joining("\n"));
-
-    Assert.assertEquals("test", readText);
-    EasyMock.reset(S3_CLIENT);
+    try (OutputStream outputStream = storageConnector.write("readWrite1")) {
+      outputStream.write("test".getBytes(StandardCharsets.UTF_8));
+    }
+    try (InputStream inputStream = storageConnector.read("readWrite1")) {
+      byte[] bytes = inputStream.readAllBytes();
+      Assertions.assertEquals("test", new String(bytes, StandardCharsets.UTF_8));
+    }
   }
 
   @Test
@@ -130,139 +167,175 @@ public class S3StorageConnectorTest
   {
     String data = "test";
 
+    try (OutputStream outputStream = storageConnector.write("readWrite2")) {
+      outputStream.write(data.getBytes(StandardCharsets.UTF_8));
+    }
+
     // non empty reads
     for (int start = 0; start < data.length(); start++) {
       for (int length = 1; length <= data.length() - start; length++) {
         String dataQueried = data.substring(start, start + length);
-        EasyMock.reset(S3_CLIENT);
-        S3Object s3Object = new S3Object();
-        s3Object.setObjectContent(
-            new ByteArrayInputStream(dataQueried.getBytes(StandardCharsets.UTF_8))
-        );
-        EasyMock.expect(
-            S3_CLIENT.getObject(
-                new GetObjectRequest(BUCKET, PREFIX + "/" + TEST_FILE).withRange(start, start + length - 1)
-            )
-        ).andReturn(s3Object);
-        EasyMock.replay(S3_CLIENT);
-
-        InputStream is = storageConnector.readRange(TEST_FILE, start, length);
-        byte[] dataBytes = new byte[length];
-        Assert.assertEquals(length, is.read(dataBytes));
-        Assert.assertEquals(-1, is.read()); // reading further produces no data
-        Assert.assertEquals(dataQueried, new String(dataBytes, StandardCharsets.UTF_8));
-        EasyMock.reset(S3_CLIENT);
+        try (InputStream inputStream = storageConnector.readRange("readWrite2", start, length)) {
+          byte[] bytes = inputStream.readAllBytes();
+          Assertions.assertEquals(dataQueried, new String(bytes, StandardCharsets.UTF_8));
+        }
       }
     }
 
     // empty read
-    EasyMock.reset(S3_CLIENT);
-    S3Object s3Object = new S3Object();
-    s3Object.setObjectContent(
-        new ByteArrayInputStream("".getBytes(StandardCharsets.UTF_8))
-    );
-    EasyMock.expect(
-        S3_CLIENT.getObject(
-            new GetObjectRequest(BUCKET, PREFIX + "/" + TEST_FILE).withRange(0, -1)
-        )
-    ).andReturn(s3Object);
-    EasyMock.replay(S3_CLIENT);
-
-    InputStream is = storageConnector.readRange(TEST_FILE, 0, 0);
-    byte[] dataBytes = new byte[0];
-    Assert.assertEquals(is.read(dataBytes), -1);
-    Assert.assertEquals("", new String(dataBytes, StandardCharsets.UTF_8));
-    EasyMock.reset(S3_CLIENT);
+    try (InputStream inputStream = storageConnector.readRange("readWrite2", 0, 0)) {
+      byte[] bytes = inputStream.readAllBytes();
+      Assertions.assertEquals("", new String(bytes, StandardCharsets.UTF_8));
+    }
   }
 
   @Test
   public void testDeleteSinglePath() throws IOException
   {
-    EasyMock.reset(S3_CLIENT);
-    S3_CLIENT.deleteObject(BUCKET, PREFIX + "/" + TEST_FILE);
-    EasyMock.expectLastCall();
-    storageConnector.deleteFile(TEST_FILE);
-    EasyMock.reset(S3_CLIENT);
-  }
+    String deleteFolderName = UUID.randomUUID().toString();
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/deleteSingle", deleteFolderName))) {
+      outputStream.write("delete".getBytes(StandardCharsets.UTF_8));
+    }
 
+    ArrayList<String> listResult = new ArrayList<>();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(1, listResult.size());
+    Assertions.assertEquals("deleteSingle", listResult.get(0));
+    storageConnector.deleteFile(StringUtils.format("%s/deleteSingle", deleteFolderName));
+
+    listResult.clear();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(0, listResult.size());
+  }
 
   @Test
   public void testDeleteMultiplePaths() throws IOException
   {
-    EasyMock.reset(S3_CLIENT);
-    String testFile2 = "file2";
-    DeleteObjectsRequest deleteObjectsRequest = new DeleteObjectsRequest(BUCKET);
-    deleteObjectsRequest.withKeys(PREFIX + "/" + TEST_FILE, PREFIX + "/" + testFile2);
-    Capture<DeleteObjectsRequest> capturedArgument = EasyMock.newCapture();
+    String deleteFolderName = UUID.randomUUID().toString();
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/deleteFirst", deleteFolderName))) {
+      outputStream.write("first".getBytes(StandardCharsets.UTF_8));
+    }
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/deleteSecond", deleteFolderName))) {
+      outputStream.write("second".getBytes(StandardCharsets.UTF_8));
+    }
 
-    EasyMock.expect(S3_CLIENT.deleteObjects(EasyMock.capture(capturedArgument))).andReturn(null).once();
-    EasyMock.replay(S3_CLIENT);
-    storageConnector.deleteFiles(Lists.newArrayList(TEST_FILE, testFile2));
+    ArrayList<String> listResult = new ArrayList<>();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(2, listResult.size());
+    Assertions.assertEquals("deleteFirst", listResult.get(0));
+    Assertions.assertEquals("deleteSecond", listResult.get(1));
 
-    Assert.assertEquals(convertDeleteObjectsRequestToString(deleteObjectsRequest), convertDeleteObjectsRequestToString(capturedArgument.getValue()));
-    EasyMock.reset(S3_CLIENT);
+    storageConnector.deleteFiles(ImmutableList.of(
+        StringUtils.format("%s/deleteFirst", deleteFolderName),
+        StringUtils.format("%s/deleteSecond", deleteFolderName)
+    ));
+
+    listResult.clear();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(0, listResult.size());
   }
-
 
   @Test
   public void testPathDeleteRecursively() throws IOException
   {
-    EasyMock.reset(S3_CLIENT, TEST_RESULT);
+    String deleteFolderName = UUID.randomUUID().toString();
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/deleteFirst", deleteFolderName))) {
+      outputStream.write("first".getBytes(StandardCharsets.UTF_8));
+    }
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/inner/deleteSecond", deleteFolderName))) {
+      outputStream.write("second".getBytes(StandardCharsets.UTF_8));
+    }
 
-    S3ObjectSummary s3ObjectSummary = new S3ObjectSummary();
-    s3ObjectSummary.setBucketName(BUCKET);
-    s3ObjectSummary.setKey(PREFIX + "/test/" + TEST_FILE);
-    s3ObjectSummary.setSize(1);
-    EasyMock.expect(S3_CLIENT.listObjectsV2((ListObjectsV2Request) EasyMock.anyObject()))
-            .andReturn(TEST_RESULT);
+    ArrayList<String> listResult = new ArrayList<>();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(2, listResult.size());
+    Assertions.assertEquals("deleteFirst", listResult.get(0));
+    Assertions.assertEquals("inner/deleteSecond", listResult.get(1));
 
-    EasyMock.expect(TEST_RESULT.getBucketName()).andReturn("123").anyTimes();
-    EasyMock.expect(TEST_RESULT.getObjectSummaries()).andReturn(Collections.singletonList(s3ObjectSummary)).anyTimes();
-    EasyMock.expect(TEST_RESULT.isTruncated()).andReturn(false).times(1);
-    EasyMock.expect(TEST_RESULT.getNextContinuationToken()).andReturn(null);
+    storageConnector.deleteRecursively(deleteFolderName);
 
-    Capture<DeleteObjectsRequest> capturedArgument = EasyMock.newCapture();
-    EasyMock.expect(S3_CLIENT.deleteObjects(EasyMock.and(
-        EasyMock.capture(capturedArgument),
-        EasyMock.isA(DeleteObjectsRequest.class)
-    ))).andReturn(null);
-    EasyMock.replay(S3_CLIENT, TEST_RESULT);
-
-    storageConnector.deleteRecursively("test");
-
-    Assert.assertEquals(1, capturedArgument.getValue().getKeys().size());
-    Assert.assertEquals(PREFIX + "/test/" + TEST_FILE, capturedArgument.getValue().getKeys().get(0).getKey());
-    EasyMock.reset(S3_CLIENT, TEST_RESULT);
+    listResult.clear();
+    storageConnector.listDir(deleteFolderName + "/").forEachRemaining(listResult::add);
+    Assertions.assertEquals(0, listResult.size());
   }
 
   @Test
   public void testListDir() throws IOException
   {
-    EasyMock.reset(S3_CLIENT, TEST_RESULT);
-
-    S3ObjectSummary s3ObjectSummary = new S3ObjectSummary();
-    s3ObjectSummary.setBucketName(BUCKET);
-    s3ObjectSummary.setKey(PREFIX + "/test/" + TEST_FILE);
-    s3ObjectSummary.setSize(1);
-
-    EasyMock.expect(TEST_RESULT.getObjectSummaries()).andReturn(Collections.singletonList(s3ObjectSummary)).times(2);
-    EasyMock.expect(TEST_RESULT.isTruncated()).andReturn(false);
-    EasyMock.expect(TEST_RESULT.getNextContinuationToken()).andReturn(null);
-    EasyMock.expect(S3_CLIENT.listObjectsV2((ListObjectsV2Request) EasyMock.anyObject()))
-            .andReturn(TEST_RESULT);
-    EasyMock.replay(S3_CLIENT, TEST_RESULT);
-
-    List<String> listDirResult = Lists.newArrayList(storageConnector.listDir("test/"));
-    Assert.assertEquals(ImmutableList.of(TEST_FILE), listDirResult);
+    String listFolderName = UUID.randomUUID().toString();
+    try (OutputStream outputStream = storageConnector.write(StringUtils.format("%s/listFirst", listFolderName))) {
+      outputStream.write("first".getBytes(StandardCharsets.UTF_8));
+    }
+    List<String> listDirResult = Lists.newArrayList(storageConnector.listDir(listFolderName + "/"));
+    Assertions.assertEquals(ImmutableList.of("listFirst"), listDirResult);
   }
 
-  private String convertDeleteObjectsRequestToString(DeleteObjectsRequest deleteObjectsRequest)
+  // adapted from apache iceberg tests
+  private static class MinioUtil
   {
-    return deleteObjectsRequest.getKeys()
-                               .stream()
-                               .map(keyVersion -> keyVersion.getKey() + keyVersion.getVersion())
-                               .collect(
-                                   Collectors.joining());
-  }
+    private MinioUtil()
+    {
+    }
 
+    public static MinIOContainer createContainer()
+    {
+      return createContainer(null);
+    }
+
+    public static MinIOContainer createContainer(AWSCredentials credentials)
+    {
+      MinIOContainer container = new MinIOContainer(DockerImageName.parse("minio/minio:latest"));
+
+      // this enables virtual-host-style requests. see
+      // https://github.com/minio/minio/tree/master/docs/config#domain
+      container.withEnv("MINIO_DOMAIN", "localhost");
+
+      if (credentials != null) {
+        container.withUserName(credentials.getAWSAccessKeyId());
+        container.withPassword(credentials.getAWSSecretKey());
+      }
+
+      return container;
+    }
+
+    public static ServerSideEncryptingAmazonS3 createS3Client(MinIOContainer container)
+    {
+      final AmazonS3ClientBuilder amazonS3ClientBuilder = AmazonS3Client
+          .builder()
+          .withEndpointConfiguration(
+              new AwsClientBuilder.EndpointConfiguration(
+                  container.getS3URL(),
+                  "us-east-1"
+              )
+          )
+          .withCredentials(new StaticCredentialsProvider(
+              new BasicAWSCredentials(container.getUserName(), container.getPassword())))
+          .withClientConfiguration(new ClientConfigurationFactory().getConfig())
+          .withPathStyleAccessEnabled(true); // OSX won't resolve subdomains
+
+      return ServerSideEncryptingAmazonS3.builder()
+                                         .setAmazonS3ClientBuilder(amazonS3ClientBuilder)
+                                         .build();
+    }
+
+    public static ServerSideEncryptingAmazonS3 createUnauthorizedS3Client(MinIOContainer container)
+    {
+      final AmazonS3ClientBuilder amazonS3ClientBuilder = AmazonS3Client
+          .builder()
+          .withEndpointConfiguration(
+              new AwsClientBuilder.EndpointConfiguration(
+                  container.getS3URL(),
+                  "us-east-1"
+              )
+          )
+          .withCredentials(new StaticCredentialsProvider(
+              new BasicAWSCredentials(container.getUserName(), "wrong")))
+          .withClientConfiguration(new ClientConfigurationFactory().getConfig())
+          .withPathStyleAccessEnabled(true); // OSX won't resolve subdomains
+
+      return ServerSideEncryptingAmazonS3.builder()
+                                         .setAmazonS3ClientBuilder(amazonS3ClientBuilder)
+                                         .build();
+    }
+  }
 }

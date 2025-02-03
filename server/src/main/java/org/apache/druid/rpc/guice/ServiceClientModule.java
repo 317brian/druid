@@ -22,6 +22,12 @@ package org.apache.druid.rpc.guice;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Binder;
 import com.google.inject.Provides;
+import org.apache.druid.client.broker.Broker;
+import org.apache.druid.client.broker.BrokerClient;
+import org.apache.druid.client.broker.BrokerClientImpl;
+import org.apache.druid.client.coordinator.Coordinator;
+import org.apache.druid.client.coordinator.CoordinatorClient;
+import org.apache.druid.client.coordinator.CoordinatorClientImpl;
 import org.apache.druid.client.indexing.IndexingService;
 import org.apache.druid.discovery.DruidNodeDiscoveryProvider;
 import org.apache.druid.discovery.NodeRole;
@@ -44,8 +50,8 @@ import java.util.concurrent.ScheduledExecutorService;
 
 public class ServiceClientModule implements DruidModule
 {
+  private static final int CLIENT_MAX_ATTEMPTS = 6;
   private static final int CONNECT_EXEC_THREADS = 4;
-  private static final int OVERLORD_ATTEMPTS = 6;
 
   @Override
   public void configure(Binder binder)
@@ -56,11 +62,9 @@ public class ServiceClientModule implements DruidModule
   @Provides
   @LazySingleton
   @EscalatedGlobal
-  public ServiceClientFactory makeServiceClientFactory(@EscalatedGlobal final HttpClient httpClient)
+  public ServiceClientFactory getServiceClientFactory(@EscalatedGlobal final HttpClient httpClient)
   {
-    final ScheduledExecutorService connectExec =
-        ScheduledExecutors.fixed(CONNECT_EXEC_THREADS, "ServiceClientFactory-%d");
-    return new ServiceClientFactoryImpl(httpClient, connectExec);
+    return makeServiceClientFactory(httpClient);
   }
 
   @Provides
@@ -72,6 +76,7 @@ public class ServiceClientModule implements DruidModule
   }
 
   @Provides
+  @LazySingleton
   public OverlordClient makeOverlordClient(
       @Json final ObjectMapper jsonMapper,
       @EscalatedGlobal final ServiceClientFactory clientFactory,
@@ -82,9 +87,68 @@ public class ServiceClientModule implements DruidModule
         clientFactory.makeClient(
             NodeRole.OVERLORD.getJsonName(),
             serviceLocator,
-            StandardRetryPolicy.builder().maxAttempts(OVERLORD_ATTEMPTS).build()
+            StandardRetryPolicy.builder().maxAttempts(CLIENT_MAX_ATTEMPTS).build()
         ),
         jsonMapper
     );
+  }
+
+  @Provides
+  @ManageLifecycle
+  @Coordinator
+  public ServiceLocator makeCoordinatorServiceLocator(final DruidNodeDiscoveryProvider discoveryProvider)
+  {
+    return new DiscoveryServiceLocator(discoveryProvider, NodeRole.COORDINATOR);
+  }
+
+  @Provides
+  @LazySingleton
+  public CoordinatorClient makeCoordinatorClient(
+      @Json final ObjectMapper jsonMapper,
+      @EscalatedGlobal final ServiceClientFactory clientFactory,
+      @Coordinator final ServiceLocator serviceLocator
+  )
+  {
+    return new CoordinatorClientImpl(
+        clientFactory.makeClient(
+            NodeRole.COORDINATOR.getJsonName(),
+            serviceLocator,
+            StandardRetryPolicy.builder().maxAttempts(CLIENT_MAX_ATTEMPTS).build()
+        ),
+        jsonMapper
+    );
+  }
+
+  @Provides
+  @ManageLifecycle
+  @Broker
+  public ServiceLocator makeBrokerServiceLocator(final DruidNodeDiscoveryProvider discoveryProvider)
+  {
+    return new DiscoveryServiceLocator(discoveryProvider, NodeRole.BROKER);
+  }
+
+  @Provides
+  @LazySingleton
+  public BrokerClient makeBrokerClient(
+      @Json final ObjectMapper jsonMapper,
+      @EscalatedGlobal final ServiceClientFactory clientFactory,
+      @Broker final ServiceLocator serviceLocator
+  )
+  {
+    return new BrokerClientImpl(
+        clientFactory.makeClient(
+            NodeRole.BROKER.getJsonName(),
+            serviceLocator,
+            StandardRetryPolicy.builder().maxAttempts(ServiceClientModule.CLIENT_MAX_ATTEMPTS).build()
+        ),
+        jsonMapper
+    );
+  }
+
+  public static ServiceClientFactory makeServiceClientFactory(@EscalatedGlobal final HttpClient httpClient)
+  {
+    final ScheduledExecutorService connectExec =
+        ScheduledExecutors.fixed(CONNECT_EXEC_THREADS, "ServiceClientFactory-%d");
+    return new ServiceClientFactoryImpl(httpClient, connectExec);
   }
 }

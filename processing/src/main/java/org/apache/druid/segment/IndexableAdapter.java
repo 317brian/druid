@@ -23,6 +23,7 @@ import com.google.errorprone.annotations.MustBeClosed;
 import org.apache.druid.segment.column.CapabilitiesBasedFormat;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnFormat;
+import org.apache.druid.segment.column.ColumnHolder;
 import org.apache.druid.segment.data.BitmapValues;
 import org.apache.druid.segment.data.CloseableIndexed;
 import org.apache.druid.segment.nested.FieldTypeInfo;
@@ -45,7 +46,12 @@ public interface IndexableAdapter
 
   int getNumRows();
 
-  List<String> getDimensionNames();
+  /**
+   * Returns names of dimension columns.
+   *
+   * @param includeTime whether to include {@link ColumnHolder#TIME_COLUMN_NAME}.
+   */
+  List<String> getDimensionNames(boolean includeTime);
 
   List<String> getMetricNames();
 
@@ -57,6 +63,8 @@ public interface IndexableAdapter
   NestedColumnMergable getNestedColumnMergeables(String column);
 
   TransformableRowIterator getRows();
+
+  IndexableAdapter getProjectionAdapter(String projection);
 
   BitmapValues getBitmapValues(String dimension, int dictId);
 
@@ -73,14 +81,40 @@ public interface IndexableAdapter
   {
     private final SortedValueDictionary valueDictionary;
     private final SortedMap<String, FieldTypeInfo.MutableTypeSet> fields;
+    private final boolean forceNestedType;
+    private final boolean isConstant;
+    @Nullable
+    private final Object constantValue;
 
     public NestedColumnMergable(
         SortedValueDictionary valueDictionary,
-        SortedMap<String, FieldTypeInfo.MutableTypeSet> fields
+        SortedMap<String, FieldTypeInfo.MutableTypeSet> fields,
+        boolean forceNestedType,
+        boolean isConstant,
+        @Nullable Object constantValue
     )
     {
       this.valueDictionary = valueDictionary;
       this.fields = fields;
+      this.forceNestedType = forceNestedType;
+      this.isConstant = isConstant;
+      this.constantValue = constantValue;
+    }
+
+    public boolean isForceNestedType()
+    {
+      return forceNestedType;
+    }
+
+    public boolean isConstant()
+    {
+      return isConstant;
+    }
+
+    @Nullable
+    public Object getConstantValue()
+    {
+      return constantValue;
     }
 
     @Nullable
@@ -96,9 +130,9 @@ public interface IndexableAdapter
         final FieldTypeInfo.MutableTypeSet types = entry.getValue();
         mergeInto.compute(fieldPath, (k, v) -> {
           if (v == null) {
-            return new FieldTypeInfo.MutableTypeSet(types.getByteValue());
+            return types;
           }
-          return v.merge(types.getByteValue());
+          return v.merge(types.getByteValue(), types.hasUntypedArray());
         });
       }
     }

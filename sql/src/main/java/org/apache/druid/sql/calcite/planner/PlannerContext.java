@@ -28,21 +28,37 @@ import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.avatica.remote.TypedValue;
 import org.apache.calcite.linq4j.QueryProvider;
 import org.apache.calcite.schema.SchemaPlus;
+import org.apache.druid.error.InvalidSqlInput;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.Numbers;
 import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.java.util.common.granularity.Granularities;
+import org.apache.druid.math.expr.Expr;
 import org.apache.druid.math.expr.ExprMacroTable;
+import org.apache.druid.query.JoinAlgorithm;
 import org.apache.druid.query.QueryContext;
 import org.apache.druid.query.QueryContexts;
+import org.apache.druid.query.explain.ExplainAttributes;
+import org.apache.druid.query.filter.InDimFilter;
+import org.apache.druid.query.filter.TypedInFilter;
+import org.apache.druid.query.lookup.LookupExtractor;
+import org.apache.druid.query.lookup.LookupExtractorFactoryContainerProvider;
+import org.apache.druid.query.lookup.RegisteredLookupExtractionFn;
 import org.apache.druid.segment.join.JoinableFactoryWrapper;
-import org.apache.druid.server.security.Access;
+import org.apache.druid.server.lookup.cache.LookupLoadingSpec;
 import org.apache.druid.server.security.AuthenticationResult;
+import org.apache.druid.server.security.AuthorizationResult;
 import org.apache.druid.server.security.ResourceAction;
+import org.apache.druid.sql.calcite.expression.SqlOperatorConversion;
+import org.apache.druid.sql.calcite.expression.builtin.QueryLookupOperatorConversion;
 import org.apache.druid.sql.calcite.rel.VirtualColumnRegistry;
+import org.apache.druid.sql.calcite.rule.AggregatePullUpLookupRule;
+import org.apache.druid.sql.calcite.rule.ReverseLookupRule;
 import org.apache.druid.sql.calcite.run.EngineFeature;
 import org.apache.druid.sql.calcite.run.QueryMaker;
 import org.apache.druid.sql.calcite.run.SqlEngine;
+import org.apache.druid.sql.hook.DruidHook.HookKey;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.Interval;
@@ -50,6 +66,7 @@ import org.joda.time.Interval;
 import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -76,19 +93,39 @@ public class PlannerContext
   public static final String CTX_SQL_OUTER_LIMIT = "sqlOuterLimit";
 
   /**
-   * Undocumented context key, used to enable window functions.
+   * Key to enable transfer of RACs over wire.
    */
-  public static final String CTX_ENABLE_WINDOW_FNS = "windowsAreForClosers";
+  public static final String CTX_ENABLE_RAC_TRANSFER_OVER_WIRE = "enableRACOverWire";
 
   /**
-   * Undocumented context key, used to enable {@link org.apache.calcite.sql.fun.SqlStdOperatorTable#UNNEST}.
+   * Context key for {@link PlannerContext#isUseBoundsAndSelectors()}.
    */
-  public static final String CTX_ENABLE_UNNEST = "enableUnnest";
+  public static final String CTX_SQL_USE_BOUNDS_AND_SELECTORS = "sqlUseBoundAndSelectors";
+  public static final boolean DEFAULT_SQL_USE_BOUNDS_AND_SELECTORS = false;
+
+  /**
+   * Context key for {@link PlannerContext#isPullUpLookup()}.
+   */
+  public static final String CTX_SQL_PULL_UP_LOOKUP = "sqlPullUpLookup";
+  public static final boolean DEFAULT_SQL_PULL_UP_LOOKUP = true;
+
+  /**
+   * Context key for {@link PlannerContext#isReverseLookup()}.
+   */
+  public static final String CTX_SQL_REVERSE_LOOKUP = "sqlReverseLookup";
+  public static final boolean DEFAULT_SQL_REVERSE_LOOKUP = true;
+
+  /**
+   * Context key for {@link PlannerContext#isUseGranularity()}.
+   */
+  public static final String CTX_SQL_USE_GRANULARITY = "sqlUseGranularity";
+  public static final boolean DEFAULT_SQL_USE_GRANULARITY = true;
 
   // DataContext keys
   public static final String DATA_CTX_AUTHENTICATION_RESULT = "authenticationResult";
 
   private final PlannerToolbox plannerToolbox;
+  private final ExpressionParser expressionParser;
   private final String sql;
   private final PlannerConfig plannerConfig;
   private final DateTime localNow;
@@ -96,6 +133,10 @@ public class PlannerContext
   private final Map<String, Object> queryContext;
   private final String sqlQueryId;
   private final boolean stringifyArrays;
+  private final boolean useBoundsAndSelectors;
+  private final boolean pullUpLookup;
+  private final boolean reverseLookup;
+  private final boolean useGranularity;
   private final CopyOnWriteArrayList<String> nativeQueryIds = new CopyOnWriteArrayList<>();
   private final PlannerHook hook;
   // bindings for dynamic parameters to bind during planning
@@ -105,7 +146,7 @@ public class PlannerContext
   // set of datasources and views which must be authorized, initialized to null so we can detect if it has been set.
   private Set<ResourceAction> resourceActions;
   // result of authorizing set of resources against authentication identity
-  private Access authorizationResult;
+  private AuthorizationResult authorizationResult;
   // error messages encountered while planning the query
   @Nullable
   private String planningError;
@@ -113,6 +154,8 @@ public class PlannerContext
   private VirtualColumnRegistry joinExpressionVirtualColumnRegistry;
   // set of attributes for a SQL statement used in the EXPLAIN PLAN output
   private ExplainAttributes explainAttributes;
+  private PlannerLookupCache lookupCache;
+  private final Set<String> lookupsToLoad = new HashSet<>();
 
   private PlannerContext(
       final PlannerToolbox plannerToolbox,
@@ -120,18 +163,27 @@ public class PlannerContext
       final PlannerConfig plannerConfig,
       final DateTime localNow,
       final boolean stringifyArrays,
+      final boolean useBoundsAndSelectors,
+      final boolean pullUpLookup,
+      final boolean reverseLookup,
+      final boolean useGranularity,
       final SqlEngine engine,
       final Map<String, Object> queryContext,
       final PlannerHook hook
   )
   {
     this.plannerToolbox = plannerToolbox;
+    this.expressionParser = new ExpressionParserImpl(plannerToolbox.exprMacroTable());
     this.sql = sql;
     this.plannerConfig = Preconditions.checkNotNull(plannerConfig, "plannerConfig");
     this.engine = engine;
     this.queryContext = queryContext;
     this.localNow = Preconditions.checkNotNull(localNow, "localNow");
     this.stringifyArrays = stringifyArrays;
+    this.useBoundsAndSelectors = useBoundsAndSelectors;
+    this.pullUpLookup = pullUpLookup;
+    this.reverseLookup = reverseLookup;
+    this.useGranularity = useGranularity;
     this.hook = hook == null ? NoOpPlannerHook.INSTANCE : hook;
 
     String sqlQueryId = (String) this.queryContext.get(QueryContexts.CTX_SQL_QUERY_ID);
@@ -153,10 +205,18 @@ public class PlannerContext
     final DateTime utcNow;
     final DateTimeZone timeZone;
     final boolean stringifyArrays;
+    final boolean useBoundsAndSelectors;
+    final boolean pullUpLookup;
+    final boolean reverseLookup;
+    final boolean useGranularity;
 
     final Object stringifyParam = queryContext.get(QueryContexts.CTX_SQL_STRINGIFY_ARRAYS);
     final Object tsParam = queryContext.get(CTX_SQL_CURRENT_TIMESTAMP);
     final Object tzParam = queryContext.get(CTX_SQL_TIME_ZONE);
+    final Object useBoundsAndSelectorsParam = queryContext.get(CTX_SQL_USE_BOUNDS_AND_SELECTORS);
+    final Object pullUpLookupParam = queryContext.get(CTX_SQL_PULL_UP_LOOKUP);
+    final Object reverseLookupParam = queryContext.get(CTX_SQL_REVERSE_LOOKUP);
+    final Object useGranularityParam = queryContext.get(CTX_SQL_USE_GRANULARITY);
 
     if (tsParam != null) {
       utcNow = new DateTime(tsParam, DateTimeZone.UTC);
@@ -176,12 +236,40 @@ public class PlannerContext
       stringifyArrays = true;
     }
 
+    if (useBoundsAndSelectorsParam != null) {
+      useBoundsAndSelectors = Numbers.parseBoolean(useBoundsAndSelectorsParam);
+    } else {
+      useBoundsAndSelectors = DEFAULT_SQL_USE_BOUNDS_AND_SELECTORS;
+    }
+
+    if (pullUpLookupParam != null) {
+      pullUpLookup = Numbers.parseBoolean(pullUpLookupParam);
+    } else {
+      pullUpLookup = DEFAULT_SQL_PULL_UP_LOOKUP;
+    }
+
+    if (reverseLookupParam != null) {
+      reverseLookup = Numbers.parseBoolean(reverseLookupParam);
+    } else {
+      reverseLookup = DEFAULT_SQL_REVERSE_LOOKUP;
+    }
+
+    if (useGranularityParam != null) {
+      useGranularity = Numbers.parseBoolean(useGranularityParam);
+    } else {
+      useGranularity = DEFAULT_SQL_USE_GRANULARITY;
+    }
+
     return new PlannerContext(
         plannerToolbox,
         sql,
         plannerToolbox.plannerConfig().withOverrides(queryContext),
         utcNow.withZone(timeZone),
         stringifyArrays,
+        useBoundsAndSelectors,
+        pullUpLookup,
+        reverseLookup,
+        useGranularity,
         engine,
         queryContext,
         hook
@@ -229,10 +317,23 @@ public class PlannerContext
     return plannerToolbox;
   }
 
-  // Deprecated: prefer using the toolbox
   public ExprMacroTable getExprMacroTable()
   {
     return plannerToolbox.exprMacroTable();
+  }
+
+  public ExpressionParser getExpressionParser()
+  {
+    return expressionParser;
+  }
+
+
+  /**
+   * Equivalent to {@link ExpressionParser#parse(String)} on {@link #getExpressionParser()}.
+   */
+  public Expr parseExpression(final String expr)
+  {
+    return expressionParser.parse(expr);
   }
 
   // Deprecated: prefer using the toolbox
@@ -268,6 +369,22 @@ public class PlannerContext
   }
 
   /**
+   * Adds the given lookup name to the lookup loading spec.
+   */
+  public void addLookupToLoad(String lookupName)
+  {
+    lookupsToLoad.add(lookupName);
+  }
+
+  /**
+   * Lookup loading spec used if this context corresponds to an MSQ task.
+   */
+  public LookupLoadingSpec getLookupLoadingSpec()
+  {
+    return lookupsToLoad.isEmpty() ? LookupLoadingSpec.NONE : LookupLoadingSpec.loadOnly(lookupsToLoad);
+  }
+
+  /**
    * Return the query context as a mutable map. Use this form when
    * modifying the context during planning.
    */
@@ -288,6 +405,54 @@ public class PlannerContext
   public boolean isStringifyArrays()
   {
     return stringifyArrays;
+  }
+
+  /**
+   * Whether we should use {@link org.apache.druid.query.filter.BoundDimFilter} and
+   * {@link org.apache.druid.query.filter.SelectorDimFilter} (true) or {@link org.apache.druid.query.filter.RangeFilter},
+   * {@link org.apache.druid.query.filter.EqualityFilter}, and {@link org.apache.druid.query.filter.NullFilter} (false).
+   *
+   * Can be overriden by the context parameter {@link #CTX_SQL_USE_BOUNDS_AND_SELECTORS}.
+   */
+  public boolean isUseBoundsAndSelectors()
+  {
+    return useBoundsAndSelectors;
+  }
+
+  /**
+   * Whether we should use {@link InDimFilter} (true) or {@link TypedInFilter} (false).
+   */
+  public boolean isUseLegacyInFilter()
+  {
+    return useBoundsAndSelectors;
+  }
+
+  /**
+   * Whether we should use {@link AggregatePullUpLookupRule} to pull LOOKUP functions on injective lookups up above
+   * a GROUP BY.
+   */
+  public boolean isPullUpLookup()
+  {
+    return pullUpLookup;
+  }
+
+  /**
+   * Whether we should use {@link ReverseLookupRule} to reduce the LOOKUP function, and whether we should set the
+   * "optimize" flag on {@link RegisteredLookupExtractionFn}.
+   */
+  public boolean isReverseLookup()
+  {
+    return reverseLookup;
+  }
+
+  /**
+   * Whether we should use granularities other than {@link Granularities#ALL} when planning queries. This is provided
+   * mainly so it can be set to false when running SQL queries on non-time-ordered tables, which do not support
+   * any other granularities.
+   */
+  public boolean isUseGranularity()
+  {
+    return useGranularity;
   }
 
   public List<TypedValue> getParameters()
@@ -344,6 +509,9 @@ public class PlannerContext
    */
   public void setPlanningError(String formatText, Object... arguments)
   {
+    if (queryContext().isDecoupledMode()) {
+      throw InvalidSqlInput.exception(formatText, arguments);
+    }
     planningError = StringUtils.nonStrictFormat(formatText, arguments);
   }
 
@@ -406,7 +574,7 @@ public class PlannerContext
   }
 
 
-  public Access getAuthorizationResult()
+  public AuthorizationResult getAuthorizationResult()
   {
     return Preconditions.checkNotNull(authorizationResult, "Authorization result not available");
   }
@@ -426,7 +594,7 @@ public class PlannerContext
     this.authenticationResult = Preconditions.checkNotNull(authenticationResult, "authenticationResult");
   }
 
-  public void setAuthorizationResult(Access access)
+  public void setAuthorizationResult(AuthorizationResult access)
   {
     if (this.authorizationResult != null) {
       // It's a bug if this happens, because setAuthorizationResult should be called exactly once.
@@ -468,26 +636,17 @@ public class PlannerContext
 
   /**
    * Checks if the current {@link SqlEngine} supports a particular feature.
-   *
-   * When executing a specific query, use this method instead of
-   * {@link SqlEngine#featureAvailable(EngineFeature, PlannerContext)}, because it also verifies feature flags such as
-   * {@link #CTX_ENABLE_WINDOW_FNS}.
+   * <p>
+   * When executing a specific query, use this method instead of {@link SqlEngine#featureAvailable(EngineFeature)}
+   * because it also verifies feature flags.
    */
   public boolean featureAvailable(final EngineFeature feature)
   {
-    if (feature == EngineFeature.WINDOW_FUNCTIONS &&
-        !QueryContexts.getAsBoolean(CTX_ENABLE_WINDOW_FNS, queryContext.get(CTX_ENABLE_WINDOW_FNS), false)) {
+    if (feature == EngineFeature.TIME_BOUNDARY_QUERY && !queryContext().isTimeBoundaryPlanningEnabled()) {
       // Short-circuit: feature requires context flag.
       return false;
     }
-
-    if (feature == EngineFeature.UNNEST &&
-        !QueryContexts.getAsBoolean(CTX_ENABLE_UNNEST, queryContext.get(CTX_ENABLE_UNNEST), false)) {
-      // Short-circuit: feature requires context flag.
-      return false;
-    }
-
-    return engine.featureAvailable(feature, this);
+    return engine.featureAvailable(feature);
   }
 
   public QueryMaker getQueryMaker()
@@ -518,4 +677,29 @@ public class PlannerContext
     this.explainAttributes = explainAttributes;
   }
 
+  /**
+   * Retrieve a named {@link LookupExtractor}.
+   */
+  public LookupExtractor getLookup(final String lookupName)
+  {
+    if (lookupCache == null) {
+      final SqlOperatorConversion lookupOperatorConversion =
+          plannerToolbox.operatorTable().lookupOperatorConversion(QueryLookupOperatorConversion.SQL_FUNCTION);
+
+      if (lookupOperatorConversion != null) {
+        final LookupExtractorFactoryContainerProvider lookupProvider =
+            ((QueryLookupOperatorConversion) lookupOperatorConversion).getLookupExtractorFactoryContainerProvider();
+        lookupCache = new PlannerLookupCache(lookupProvider);
+      } else {
+        lookupCache = new PlannerLookupCache(null);
+      }
+    }
+
+    return lookupCache.getLookup(lookupName);
+  }
+
+  public <T> void dispatchHook(HookKey<T> key, T object)
+  {
+    plannerToolbox.getHookDispatcher().dispatch(key, object);
+  }
 }

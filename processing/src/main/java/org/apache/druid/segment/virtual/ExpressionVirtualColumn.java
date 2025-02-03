@@ -34,6 +34,9 @@ import org.apache.druid.math.expr.ExpressionProcessing;
 import org.apache.druid.math.expr.Parser;
 import org.apache.druid.query.cache.CacheKeyBuilder;
 import org.apache.druid.query.dimension.DimensionSpec;
+import org.apache.druid.query.filter.ColumnIndexSelector;
+import org.apache.druid.query.groupby.DeferExpressionDimensions;
+import org.apache.druid.query.groupby.epinephelinae.vector.GroupByVectorColumnSelector;
 import org.apache.druid.segment.ColumnInspector;
 import org.apache.druid.segment.ColumnSelectorFactory;
 import org.apache.druid.segment.ColumnValueSelector;
@@ -41,6 +44,7 @@ import org.apache.druid.segment.DimensionSelector;
 import org.apache.druid.segment.VirtualColumn;
 import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnCapabilitiesImpl;
+import org.apache.druid.segment.column.ColumnIndexSupplier;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.column.ValueType;
 import org.apache.druid.segment.vector.SingleValueDimensionVectorSelector;
@@ -57,12 +61,14 @@ public class ExpressionVirtualColumn implements VirtualColumn
   private static final Logger log = new Logger(ExpressionVirtualColumn.class);
 
   private final String name;
-  private final String expression;
-  @Nullable
-  private final ColumnType outputType;
+  private final Expression expression;
   private final Supplier<Expr> parsedExpression;
+  private final Supplier<Expr.BindingAnalysis> expressionAnalysis;
   private final Supplier<byte[]> cacheKey;
 
+  /**
+   * Constructor for deserialization.
+   */
   @JsonCreator
   public ExpressionVirtualColumn(
       @JsonProperty("name") String name,
@@ -71,28 +77,57 @@ public class ExpressionVirtualColumn implements VirtualColumn
       @JacksonInject ExprMacroTable macroTable
   )
   {
-    this.name = Preconditions.checkNotNull(name, "name");
-    this.expression = Preconditions.checkNotNull(expression, "expression");
-    this.outputType = outputType;
-    this.parsedExpression = Parser.lazyParse(expression, macroTable);
-    this.cacheKey = makeCacheKeySupplier();
+    this(name, expression, outputType, Parser.lazyParse(expression, macroTable));
   }
 
   /**
-   * Constructor for creating an ExpressionVirtualColumn from a pre-parsed expression.
+   * Constructor for creating an ExpressionVirtualColumn from a pre-parsed-and-analyzed expression, where the original
+   * expression string is known.
    */
   public ExpressionVirtualColumn(
-      String name,
-      Expr parsedExpression,
-      @Nullable ColumnType outputType
+      final String name,
+      final String expression,
+      final Expr parsedExpression,
+      @Nullable final ColumnType outputType
+  )
+  {
+    this(name, expression, outputType, () -> parsedExpression);
+  }
+
+  /**
+   * Constructor for creating an ExpressionVirtualColumn from a pre-parsed expression, where the original
+   * expression string is not known.
+   *
+   * This constructor leads to an instance where {@link #getExpression()} is the toString representation of the
+   * parsed expression, which is not necessarily a valid expression. Do not try to reparse it as an expression, as
+   * this will not work.
+   *
+   * If you know the original expression, use
+   * {@link ExpressionVirtualColumn#ExpressionVirtualColumn(String, String, Expr, ColumnType)} instead.
+   */
+  public ExpressionVirtualColumn(
+      final String name,
+      final Expr parsedExpression,
+      @Nullable final ColumnType outputType
+  )
+  {
+    this(name, parsedExpression.toString(), outputType, () -> parsedExpression);
+  }
+
+  /**
+   * Private constructor used by the public ones.
+   */
+  private ExpressionVirtualColumn(
+      final String name,
+      final String expression,
+      @Nullable final ColumnType outputType,
+      final Supplier<Expr> parsedExpression
   )
   {
     this.name = Preconditions.checkNotNull(name, "name");
-    // Unfortunately this string representation can't be reparsed into the same expression, might be useful
-    // if the expression system supported that
-    this.expression = parsedExpression.toString();
-    this.outputType = outputType;
-    this.parsedExpression = Suppliers.ofInstance(parsedExpression);
+    this.expression = new Expression(Preconditions.checkNotNull(expression, "expression"), outputType);
+    this.parsedExpression = parsedExpression;
+    this.expressionAnalysis = Suppliers.memoize(parsedExpression.get()::analyzeInputs);
     this.cacheKey = makeCacheKeySupplier();
   }
 
@@ -106,14 +141,14 @@ public class ExpressionVirtualColumn implements VirtualColumn
   @JsonProperty
   public String getExpression()
   {
-    return expression;
+    return expression.expressionString;
   }
 
   @Nullable
   @JsonProperty
   public ColumnType getOutputType()
   {
-    return outputType;
+    return expression.outputType;
   }
 
   @JsonIgnore
@@ -205,7 +240,39 @@ public class ExpressionVirtualColumn implements VirtualColumn
       return factory.makeObjectSelector(parsedExpression.get().getBindingIfIdentifier());
     }
 
-    return ExpressionVectorSelectors.makeVectorObjectSelector(factory, parsedExpression.get());
+    return ExpressionVectorSelectors.makeVectorObjectSelector(factory, parsedExpression.get(), expression.outputType);
+  }
+
+  @Nullable
+  @Override
+  public GroupByVectorColumnSelector makeGroupByVectorColumnSelector(
+      String columnName,
+      VectorColumnSelectorFactory factory,
+      DeferExpressionDimensions deferExpressionDimensions
+  )
+  {
+    if (isDirectAccess(factory)) {
+      return factory.makeGroupByVectorColumnSelector(
+          parsedExpression.get().getBindingIfIdentifier(),
+          deferExpressionDimensions
+      );
+    }
+
+    return ExpressionVectorSelectors.makeGroupByVectorColumnSelector(
+        factory,
+        parsedExpression.get(),
+        deferExpressionDimensions
+    );
+  }
+
+  @Nullable
+  @Override
+  public ColumnIndexSupplier getIndexSupplier(
+      String columnName,
+      ColumnIndexSelector columnIndexSelector
+  )
+  {
+    return getParsedExpression().get().asColumnIndexSupplier(columnIndexSelector, expression.outputType);
   }
 
   @Override
@@ -215,7 +282,7 @@ public class ExpressionVirtualColumn implements VirtualColumn
     // are unable to compute the output type of the expression, either due to incomplete type information of the
     // inputs or because of unimplemented methods on expression implementations themselves, or, because a
     // ColumnInspector is not available
-
+    final ColumnType outputType = expression.outputType;
     if (ExpressionProcessing.processArraysAsMultiValueStrings() && outputType != null && outputType.isArray()) {
       return new ColumnCapabilitiesImpl().setType(ColumnType.STRING).setHasMultipleValues(true);
     }
@@ -231,6 +298,8 @@ public class ExpressionVirtualColumn implements VirtualColumn
       return inspector.getColumnCapabilities(parsedExpression.get().getBindingIfIdentifier());
     }
 
+    final ColumnType outputType = expression.outputType;
+
     final ExpressionPlan plan = ExpressionPlanner.plan(inspector, parsedExpression.get());
     final ColumnCapabilities inferred = plan.inferColumnCapabilities(outputType);
     // if we can infer the column capabilities from the expression plan, then use that
@@ -243,14 +312,14 @@ public class ExpressionVirtualColumn implements VirtualColumn
           log.warn(
               "Projected output type %s of expression %s does not match provided type %s",
               inferred.asTypeString(),
-              expression,
+              expression.expressionString,
               outputType
           );
         } else {
           log.debug(
               "Projected output type %s of expression %s does not match provided type %s",
               inferred.asTypeString(),
-              expression,
+              expression.expressionString,
               outputType
           );
         }
@@ -265,7 +334,7 @@ public class ExpressionVirtualColumn implements VirtualColumn
   @Override
   public List<String> requiredColumns()
   {
-    return parsedExpression.get().analyzeInputs().getRequiredBindingsList();
+    return expressionAnalysis.get().getRequiredBindingsList();
   }
 
   @Override
@@ -280,6 +349,13 @@ public class ExpressionVirtualColumn implements VirtualColumn
     return cacheKey.get();
   }
 
+  @Nullable
+  @Override
+  public EquivalenceKey getEquivalanceKey()
+  {
+    return expression;
+  }
+
   @Override
   public boolean equals(final Object o)
   {
@@ -291,14 +367,13 @@ public class ExpressionVirtualColumn implements VirtualColumn
     }
     final ExpressionVirtualColumn that = (ExpressionVirtualColumn) o;
     return Objects.equals(name, that.name) &&
-           Objects.equals(expression, that.expression) &&
-           Objects.equals(outputType, that.outputType);
+           Objects.equals(expression, that.expression);
   }
 
   @Override
   public int hashCode()
   {
-    return Objects.hash(name, expression, outputType);
+    return Objects.hash(name, expression);
   }
 
   @Override
@@ -306,8 +381,7 @@ public class ExpressionVirtualColumn implements VirtualColumn
   {
     return "ExpressionVirtualColumn{" +
            "name='" + name + '\'' +
-           ", expression='" + expression + '\'' +
-           ", outputType=" + outputType +
+           ", expression=" + expression +
            '}';
   }
 
@@ -321,10 +395,10 @@ public class ExpressionVirtualColumn implements VirtualColumn
       final ColumnCapabilities baseCapabilities =
           inspector.getColumnCapabilities(parsedExpression.get().getBindingIfIdentifier());
 
-      if (outputType == null) {
+      if (expression.outputType == null) {
         // No desired output type. Anything from the source is fine.
         return true;
-      } else if (baseCapabilities != null && outputType.equals(baseCapabilities.toColumnType())) {
+      } else if (baseCapabilities != null && expression.outputType.equals(baseCapabilities.toColumnType())) {
         // Desired output type matches the type from the source.
         return true;
       }
@@ -340,10 +414,57 @@ public class ExpressionVirtualColumn implements VirtualColumn
           .appendString(name)
           .appendCacheable(parsedExpression.get());
 
-      if (outputType != null) {
-        builder.appendString(outputType.toString());
+      if (expression.outputType != null) {
+        builder.appendString(expression.outputType.toString());
       }
       return builder.build();
     });
+  }
+
+  /**
+   * {@link VirtualColumn.EquivalenceKey} for expressions. Note that this does not check true equivalence of
+   * expressions, for example it will not currently consider something like 'a + b' equivalent to 'b + a'. This is ok
+   * for current uses of this functionality, but in theory we could push down equivalence to the parsed expression
+   * instead of checking for an identical string expression, it would just be a lot more expensive.
+   */
+  private static final class Expression implements EquivalenceKey
+  {
+    private final String expressionString;
+    @Nullable
+    private final ColumnType outputType;
+
+    private Expression(String expression, @Nullable ColumnType outputType)
+    {
+      this.expressionString = expression;
+      this.outputType = outputType;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+      Expression that = (Expression) o;
+      return Objects.equals(expressionString, that.expressionString) && Objects.equals(outputType, that.outputType);
+    }
+
+    @Override
+    public int hashCode()
+    {
+      return Objects.hash(expressionString, outputType);
+    }
+
+    @Override
+    public String toString()
+    {
+      return "Expression{" +
+             "expression='" + expressionString + '\'' +
+             ", outputType=" + outputType +
+             '}';
+    }
   }
 }

@@ -105,10 +105,9 @@ public class NullColumnPartSerde implements ColumnPartSerde
   @Override
   public Deserializer getDeserializer()
   {
-    return (buffer, builder, columnConfig) -> {
+    return (buffer, builder, columnConfig, parent) -> {
       builder.setHasMultipleValues(false)
              .setHasNulls(true)
-             .setFilterable(true)
              // this is a bit sneaky, we set supplier to null here to act like a null column instead of a column
              // without any indexes, which is the default state
              .setIndexSupplier(null, true, false)

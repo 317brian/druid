@@ -46,6 +46,7 @@ import org.apache.druid.segment.transform.TransformSpec;
 import org.apache.druid.segment.writeout.OffHeapMemorySegmentWriteOutMediumFactory;
 import org.apache.druid.segment.writeout.SegmentWriteOutMediumFactory;
 import org.apache.druid.timeline.SegmentId;
+import org.joda.time.Interval;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -62,6 +63,7 @@ import java.util.function.Function;
 /**
  * Helps tests make segments.
  */
+@SuppressWarnings({"NotNullFieldNotInitialized", "FieldMayBeFinal", "ConstantConditions", "NullableProblems"})
 public class IndexBuilder
 {
   private static final int ROWS_PER_INDEX_FOR_MERGING = 1;
@@ -89,6 +91,8 @@ public class IndexBuilder
   @Nullable
   private File inputSourceTmpDir = null;
 
+  private boolean writeNullColumns = false;
+
   private IndexBuilder(ObjectMapper jsonMapper, ColumnConfig columnConfig)
   {
     this.jsonMapper = jsonMapper;
@@ -98,7 +102,7 @@ public class IndexBuilder
 
   public static IndexBuilder create()
   {
-    return new IndexBuilder(TestHelper.JSON_MAPPER, TestHelper.NO_CACHE_ALWAYS_USE_INDEXES_COLUMN_CONFIG);
+    return new IndexBuilder(TestHelper.JSON_MAPPER, ColumnConfig.DEFAULT);
   }
 
   public static IndexBuilder create(ColumnConfig columnConfig)
@@ -108,12 +112,17 @@ public class IndexBuilder
 
   public static IndexBuilder create(ObjectMapper jsonMapper)
   {
-    return new IndexBuilder(jsonMapper, TestHelper.NO_CACHE_ALWAYS_USE_INDEXES_COLUMN_CONFIG);
+    return new IndexBuilder(jsonMapper, ColumnConfig.DEFAULT);
   }
 
   public static IndexBuilder create(ObjectMapper jsonMapper, ColumnConfig columnConfig)
   {
     return new IndexBuilder(jsonMapper, columnConfig);
+  }
+
+  public IndexIO getIndexIO()
+  {
+    return indexIO;
   }
 
   public IndexBuilder schema(IncrementalIndexSchema schema)
@@ -125,12 +134,13 @@ public class IndexBuilder
   public IndexBuilder segmentWriteOutMediumFactory(SegmentWriteOutMediumFactory segmentWriteOutMediumFactory)
   {
     this.segmentWriteOutMediumFactory = segmentWriteOutMediumFactory;
-    this.indexMerger = new IndexMergerV9(jsonMapper, indexIO, segmentWriteOutMediumFactory);
+    this.indexMerger = new IndexMergerV9(jsonMapper, indexIO, segmentWriteOutMediumFactory, writeNullColumns);
     return this;
   }
 
   public IndexBuilder writeNullColumns(boolean shouldWriteNullColumns)
   {
+    this.writeNullColumns = shouldWriteNullColumns;
     this.indexMerger = new IndexMergerV9(jsonMapper, indexIO, segmentWriteOutMediumFactory, shouldWriteNullColumns);
     return this;
   }
@@ -198,12 +208,6 @@ public class IndexBuilder
     return this;
   }
 
-  public IndexBuilder maxRows(int maxRows)
-  {
-    this.maxRows = maxRows;
-    return this;
-  }
-
   public IndexBuilder intermediaryPersistSize(int rows)
   {
     this.intermediatePersistSize = rows;
@@ -231,7 +235,12 @@ public class IndexBuilder
     return buildIncrementalIndexWithRows(schema, maxRows, rows);
   }
 
-  public QueryableIndex buildMMappedIndex()
+  public File buildMMappedIndexFile()
+  {
+    return buildMMappedIndexFile(null);
+  }
+
+  public File buildMMappedIndexFile(@Nullable Interval dataInterval)
   {
     Preconditions.checkNotNull(indexMerger, "indexMerger");
     Preconditions.checkNotNull(tmpDir, "tmpDir");
@@ -241,6 +250,7 @@ public class IndexBuilder
               indexIO.loadIndex(
                   indexMerger.persist(
                       incrementalIndex,
+                      dataInterval == null ? incrementalIndex.getInterval() : dataInterval,
                       new File(
                           tmpDir,
                           StringUtils.format("testIndex-%s", ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE))
@@ -255,16 +265,14 @@ public class IndexBuilder
       // queryable index instead of the incremental index, which also mimics the behavior of real ingestion tasks
       // which persist incremental indexes as intermediate segments and then merges all the intermediate segments to
       // publish
-      return indexIO.loadIndex(
-          indexMerger.merge(
-              adapters,
-              schema.isRollup(),
-              schema.getMetrics(),
-              tmpDir,
-              schema.getDimensionsSpec(),
-              indexSpec,
-              Integer.MAX_VALUE
-          )
+      return indexMerger.merge(
+          adapters,
+          schema.isRollup(),
+          schema.getMetrics(),
+          tmpDir,
+          schema.getDimensionsSpec(),
+          indexSpec,
+          -1
       );
     }
     catch (IOException e) {
@@ -272,6 +280,25 @@ public class IndexBuilder
     }
   }
 
+  public QueryableIndex buildMMappedIndex()
+  {
+    try {
+      return indexIO.loadIndex(buildMMappedIndexFile(null));
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public QueryableIndex buildMMappedIndex(Interval dataInterval)
+  {
+    try {
+      return indexIO.loadIndex(buildMMappedIndexFile(dataInterval));
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
 
   public QueryableIndex buildMMappedMergedIndex()
   {
@@ -311,7 +338,7 @@ public class IndexBuilder
           i++;
         } else {
           persisted.add(
-              TestHelper.getTestIndexIO().loadIndex(
+              indexIO.loadIndex(
                   indexMerger.persist(
                       incrementalIndex,
                       new File(tmpDir, StringUtils.format("testIndex-%s", UUID.randomUUID().toString())),
@@ -329,7 +356,7 @@ public class IndexBuilder
       }
       if (i != 0) {
         persisted.add(
-            TestHelper.getTestIndexIO().loadIndex(
+            indexIO.loadIndex(
                 indexMerger.persist(
                     incrementalIndex,
                     new File(tmpDir, StringUtils.format("testIndex-%s", UUID.randomUUID().toString())),
@@ -340,7 +367,7 @@ public class IndexBuilder
         );
       }
 
-      final QueryableIndex merged = TestHelper.getTestIndexIO().loadIndex(
+      final QueryableIndex merged = indexIO.loadIndex(
           indexMerger.mergeQueryableIndex(
               persisted,
               true,
@@ -351,7 +378,7 @@ public class IndexBuilder
                   ),
                   AggregatorFactory.class
               ),
-              null,
+              schema.getDimensionsSpec(),
               new File(tmpDir, StringUtils.format("testIndex-%s", UUID.randomUUID())),
               indexSpec,
               indexSpec,
@@ -384,7 +411,7 @@ public class IndexBuilder
   {
     // Determine row signature by building an mmapped index first.
     try (final QueryableIndex index = buildMMappedIndex()) {
-      final RowSignature signature = new QueryableIndexStorageAdapter(index).getRowSignature();
+      final RowSignature signature = new QueryableIndexCursorFactory(index).getRowSignature();
 
       return new RowBasedSegment<>(
           SegmentId.dummy("IndexBuilder"),
@@ -399,8 +426,8 @@ public class IndexBuilder
   {
     // Build mmapped index first, then copy over.
     try (final QueryableIndex index = buildMMappedIndex()) {
-      return FrameTestUtil.adapterToFrameSegment(
-          new QueryableIndexStorageAdapter(index),
+      return FrameTestUtil.cursorFactoryToFrameSegment(
+          new QueryableIndexCursorFactory(index),
           frameType,
           SegmentId.dummy("IndexBuilder")
       );

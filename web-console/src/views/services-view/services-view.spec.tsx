@@ -16,8 +16,6 @@
  * limitations under the License.
  */
 
-import React from 'react';
-
 import { Capabilities } from '../../helpers';
 import { QueryState } from '../../utils';
 import { shallow } from '../../utils/shallow-renderer';
@@ -84,7 +82,14 @@ jest.mock('../../utils', () => {
 
 describe('ServicesView', () => {
   it('renders data', () => {
-    const comp = <ServicesView goToQuery={() => {}} capabilities={Capabilities.FULL} />;
+    const comp = (
+      <ServicesView
+        filters={[]}
+        onFiltersChange={() => {}}
+        goToQuery={() => {}}
+        capabilities={Capabilities.FULL}
+      />
+    );
 
     const servicesView = shallow(comp);
     expect(servicesView).toMatchSnapshot();

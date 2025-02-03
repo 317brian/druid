@@ -21,7 +21,6 @@ package org.apache.druid.query.aggregation.datasketches.kll;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.guava.Sequence;
@@ -31,7 +30,6 @@ import org.apache.druid.query.aggregation.AggregatorFactory;
 import org.apache.druid.query.groupby.GroupByQueryConfig;
 import org.apache.druid.query.groupby.GroupByQueryRunnerTest;
 import org.apache.druid.query.groupby.ResultRow;
-import org.apache.druid.query.groupby.strategy.GroupByStrategySelector;
 import org.apache.druid.testing.InitializedNullHandlingTest;
 import org.junit.After;
 import org.junit.Assert;
@@ -364,7 +362,7 @@ public class KllDoublesSketchAggregatorTest extends InitializedNullHandlingTest
     Object sketchObjectWithNulls = row.get(1);
     Assert.assertTrue(sketchObjectWithNulls instanceof Long);
     long sketchValueWithNulls = (long) sketchObjectWithNulls;
-    Assert.assertEquals(NullHandling.replaceWithDefault() ? 400 : 355, sketchValueWithNulls);
+    Assert.assertEquals(355, sketchValueWithNulls);
 
     // post agg
     Object quantileObject = row.get(2);
@@ -392,7 +390,7 @@ public class KllDoublesSketchAggregatorTest extends InitializedNullHandlingTest
     Object quantileObjectWithNulls = row.get(5);
     Assert.assertTrue(quantileObjectWithNulls instanceof Double);
     Assert.assertEquals(
-        NullHandling.replaceWithDefault() ? 7.2 : 7.5,
+        7.5,
         (double) quantileObjectWithNulls,
         0.1
     ); // median value
@@ -401,8 +399,8 @@ public class KllDoublesSketchAggregatorTest extends InitializedNullHandlingTest
     Object quantilesObjectWithNulls = row.get(6);
     Assert.assertTrue(quantilesObjectWithNulls instanceof double[]);
     double[] quantilesWithNulls = (double[]) quantilesObjectWithNulls;
-    Assert.assertEquals(NullHandling.replaceWithDefault() ? 0.0 : 5.0, quantilesWithNulls[0], 0.05); // min value
-    Assert.assertEquals(NullHandling.replaceWithDefault() ? 7.2 : 7.5, quantilesWithNulls[1], 0.1); // median value
+    Assert.assertEquals(5.0, quantilesWithNulls[0], 0.05); // min value
+    Assert.assertEquals(7.5, quantilesWithNulls[1], 0.1); // median value
     Assert.assertEquals(10.0, quantilesWithNulls[2], 0.05); // max value
 
     // post agg with nulls
@@ -541,92 +539,47 @@ public class KllDoublesSketchAggregatorTest extends InitializedNullHandlingTest
   @Test
   public void testSuccessWhenMaxStreamLengthHit() throws Exception
   {
-    if (GroupByStrategySelector.STRATEGY_V1.equals(config.getDefaultStrategy())) {
-      helper.createIndexAndRunQueryOnSegment(
-          new File(this.getClass().getClassLoader().getResource("kll/kll_doubles_sketch_build_data.tsv").getFile()),
-          String.join(
-              "\n",
-              "{",
-              "  \"type\": \"string\",",
-              "  \"parseSpec\": {",
-              "    \"format\": \"tsv\",",
-              "    \"timestampSpec\": {\"column\": \"timestamp\", \"format\": \"yyyyMMddHH\"},",
-              "    \"dimensionsSpec\": {",
-              "      \"dimensions\": [\"sequenceNumber\", \"product\"],",
-              "      \"dimensionExclusions\": [],",
-              "      \"spatialDimensions\": []",
-              "    },",
-              "    \"columns\": [\"timestamp\", \"sequenceNumber\", \"product\", \"value\"]",
-              "  }",
-              "}"
-          ),
-          "[{\"type\": \"doubleSum\", \"name\": \"value\", \"fieldName\": \"value\"}]",
-          0, // minTimestamp
-          Granularities.NONE,
-          10, // maxRowCount
-          String.join(
-              "\n",
-              "{",
-              "  \"queryType\": \"groupBy\",",
-              "  \"dataSource\": \"test_datasource\",",
-              "  \"granularity\": \"ALL\",",
-              "  \"dimensions\": [],",
-              "  \"aggregations\": [",
-              "    {\"type\": \"KllDoublesSketch\", \"name\": \"sketch\", \"fieldName\": \"value\", \"k\": 200, \"maxStreamLength\": 10}",
-              "  ],",
-              "  \"postAggregations\": [",
-              "    {\"type\": \"KllDoublesSketchToQuantile\", \"name\": \"quantile\", \"fraction\": 0.5, \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
-              "    {\"type\": \"KllDoublesSketchToQuantiles\", \"name\": \"quantiles\", \"fractions\": [0, 0.5, 1], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
-              "    {\"type\": \"KllDoublesSketchToHistogram\", \"name\": \"histogram\", \"splitPoints\": [0.25, 0.5, 0.75], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}}",
-              "  ],",
-              "  \"intervals\": [\"2016-01-01T00:00:00.000Z/2016-01-31T00:00:00.000Z\"]",
-              "}"
-          )
-      );
-    } else {
-      Sequence<ResultRow> seq = helper.createIndexAndRunQueryOnSegment(
-          new File(this.getClass().getClassLoader().getResource("kll/kll_doubles_sketch_build_data.tsv").getFile()),
-          String.join(
-              "\n",
-              "{",
-              "  \"type\": \"string\",",
-              "  \"parseSpec\": {",
-              "    \"format\": \"tsv\",",
-              "    \"timestampSpec\": {\"column\": \"timestamp\", \"format\": \"yyyyMMddHH\"},",
-              "    \"dimensionsSpec\": {",
-              "      \"dimensions\": [\"sequenceNumber\", \"product\"],",
-              "      \"dimensionExclusions\": [],",
-              "      \"spatialDimensions\": []",
-              "    },",
-              "    \"columns\": [\"timestamp\", \"sequenceNumber\", \"product\", \"value\"]",
-              "  }",
-              "}"
-          ),
-          "[{\"type\": \"doubleSum\", \"name\": \"value\", \"fieldName\": \"value\"}]",
-          0, // minTimestamp
-          Granularities.NONE,
-          10, // maxRowCount
-          String.join(
-              "\n",
-              "{",
-              "  \"queryType\": \"groupBy\",",
-              "  \"dataSource\": \"test_datasource\",",
-              "  \"granularity\": \"ALL\",",
-              "  \"dimensions\": [],",
-              "  \"aggregations\": [",
-              "    {\"type\": \"KllDoublesSketch\", \"name\": \"sketch\", \"fieldName\": \"value\", \"k\": 200, \"maxStreamLength\": 10}",
-              "  ],",
-              "  \"postAggregations\": [",
-              "    {\"type\": \"KllDoublesSketchToQuantile\", \"name\": \"quantile\", \"fraction\": 0.5, \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
-              "    {\"type\": \"KllDoublesSketchToQuantiles\", \"name\": \"quantiles\", \"fractions\": [0, 0.5, 1], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
-              "    {\"type\": \"KllDoublesSketchToHistogram\", \"name\": \"histogram\", \"splitPoints\": [0.25, 0.5, 0.75], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}}",
-              "  ],",
-              "  \"intervals\": [\"2016-01-01T00:00:00.000Z/2016-01-31T00:00:00.000Z\"]",
-              "}"
-          )
-      );
-      seq.toList();
-    }
+    Sequence<ResultRow> seq = helper.createIndexAndRunQueryOnSegment(
+        new File(this.getClass().getClassLoader().getResource("kll/kll_doubles_sketch_build_data.tsv").getFile()),
+        String.join(
+            "\n",
+            "{",
+            "  \"type\": \"string\",",
+            "  \"parseSpec\": {",
+            "    \"format\": \"tsv\",",
+            "    \"timestampSpec\": {\"column\": \"timestamp\", \"format\": \"yyyyMMddHH\"},",
+            "    \"dimensionsSpec\": {",
+            "      \"dimensions\": [\"sequenceNumber\", \"product\"],",
+            "      \"dimensionExclusions\": [],",
+            "      \"spatialDimensions\": []",
+            "    },",
+            "    \"columns\": [\"timestamp\", \"sequenceNumber\", \"product\", \"value\"]",
+            "  }",
+            "}"
+        ),
+        "[{\"type\": \"doubleSum\", \"name\": \"value\", \"fieldName\": \"value\"}]",
+        0, // minTimestamp
+        Granularities.NONE,
+        10, // maxRowCount
+        String.join(
+            "\n",
+            "{",
+            "  \"queryType\": \"groupBy\",",
+            "  \"dataSource\": \"test_datasource\",",
+            "  \"granularity\": \"ALL\",",
+            "  \"dimensions\": [],",
+            "  \"aggregations\": [",
+            "    {\"type\": \"KllDoublesSketch\", \"name\": \"sketch\", \"fieldName\": \"value\", \"k\": 200, \"maxStreamLength\": 10}",
+            "  ],",
+            "  \"postAggregations\": [",
+            "    {\"type\": \"KllDoublesSketchToQuantile\", \"name\": \"quantile\", \"fraction\": 0.5, \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
+            "    {\"type\": \"KllDoublesSketchToQuantiles\", \"name\": \"quantiles\", \"fractions\": [0, 0.5, 1], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}},",
+            "    {\"type\": \"KllDoublesSketchToHistogram\", \"name\": \"histogram\", \"splitPoints\": [0.25, 0.5, 0.75], \"field\": {\"type\": \"fieldAccess\", \"fieldName\": \"sketch\"}}",
+            "  ],",
+            "  \"intervals\": [\"2016-01-01T00:00:00.000Z/2016-01-31T00:00:00.000Z\"]",
+            "}"
+        )
+    );
+    seq.toList();
   }
-
 }

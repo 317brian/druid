@@ -142,12 +142,13 @@ public class LongNumericColumnPartSerdeV2 implements ColumnPartSerde
   @Override
   public Deserializer getDeserializer()
   {
-    return (buffer, builder, columnConfig) -> {
+    return (buffer, builder, columnConfig, parent) -> {
       int offset = buffer.getInt();
       int initialPos = buffer.position();
       final CompressedColumnarLongsSupplier column = CompressedColumnarLongsSupplier.fromByteBuffer(
           buffer,
-          byteOrder
+          byteOrder,
+          builder.getFileMapper()
       );
       buffer.position(initialPos + offset);
       final ImmutableBitmap bitmap;

@@ -16,8 +16,6 @@
  * limitations under the License.
  */
 
-import React from 'react';
-
 import { Capabilities } from '../../helpers';
 import { shallow } from '../../utils/shallow-renderer';
 
@@ -27,8 +25,10 @@ describe('DatasourcesView', () => {
   it('matches snapshot', () => {
     const dataSourceView = shallow(
       <DatasourcesView
+        filters={[]}
+        onFiltersChange={() => {}}
         goToQuery={() => {}}
-        goToTask={() => null}
+        goToTasks={() => null}
         goToSegments={() => {}}
         capabilities={Capabilities.FULL}
       />,

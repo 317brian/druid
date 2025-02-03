@@ -19,10 +19,12 @@
 
 package org.apache.druid.server;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.jaxrs.smile.SmileMediaTypes;
 import com.google.common.base.Suppliers;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -30,18 +32,26 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.inject.Injector;
 import com.google.inject.Key;
+import org.apache.druid.error.DruidException;
+import org.apache.druid.error.DruidExceptionMatcher;
+import org.apache.druid.error.ErrorResponse;
 import org.apache.druid.guice.GuiceInjectors;
 import org.apache.druid.guice.annotations.Smile;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.concurrent.Execs;
+import org.apache.druid.java.util.common.guava.Accumulator;
 import org.apache.druid.java.util.common.guava.LazySequence;
+import org.apache.druid.java.util.common.guava.Sequence;
 import org.apache.druid.java.util.common.guava.Sequences;
+import org.apache.druid.java.util.common.guava.Yielder;
+import org.apache.druid.java.util.common.guava.Yielders;
+import org.apache.druid.java.util.common.guava.YieldingAccumulator;
 import org.apache.druid.java.util.emitter.EmittingLogger;
 import org.apache.druid.java.util.emitter.service.ServiceEmitter;
 import org.apache.druid.query.BadJsonQueryException;
 import org.apache.druid.query.DefaultGenericQueryMetricsFactory;
 import org.apache.druid.query.DefaultQueryConfig;
-import org.apache.druid.query.MapQueryToolChestWarehouse;
+import org.apache.druid.query.DefaultQueryRunnerFactoryConglomerate;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryCapacityExceededException;
 import org.apache.druid.query.QueryException;
@@ -49,17 +59,19 @@ import org.apache.druid.query.QueryInterruptedException;
 import org.apache.druid.query.QueryRunner;
 import org.apache.druid.query.QuerySegmentWalker;
 import org.apache.druid.query.QueryTimeoutException;
-import org.apache.druid.query.QueryToolChestWarehouse;
 import org.apache.druid.query.QueryUnsupportedException;
 import org.apache.druid.query.ResourceLimitExceededException;
 import org.apache.druid.query.Result;
 import org.apache.druid.query.SegmentDescriptor;
 import org.apache.druid.query.TruncatedResponseContextException;
+import org.apache.druid.query.filter.NullFilter;
+import org.apache.druid.query.policy.RowFilterPolicy;
 import org.apache.druid.query.timeboundary.TimeBoundaryResultValue;
 import org.apache.druid.server.initialization.ServerConfig;
 import org.apache.druid.server.log.TestRequestLogger;
 import org.apache.druid.server.metrics.NoopServiceEmitter;
 import org.apache.druid.server.mocks.ExceptionalInputStream;
+import org.apache.druid.server.mocks.MockAsyncContext;
 import org.apache.druid.server.mocks.MockHttpServletRequest;
 import org.apache.druid.server.mocks.MockHttpServletResponse;
 import org.apache.druid.server.scheduling.HiLoQueryLaningStrategy;
@@ -76,33 +88,46 @@ import org.apache.druid.server.security.AuthorizerMapper;
 import org.apache.druid.server.security.ForbiddenException;
 import org.apache.druid.server.security.Resource;
 import org.apache.http.HttpStatus;
+import org.easymock.EasyMock;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.server.HttpChannel;
+import org.eclipse.jetty.server.HttpOutput;
+import org.hamcrest.CoreMatchers;
+import org.hamcrest.MatcherAssert;
 import org.joda.time.Interval;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.internal.matchers.ThrowableMessageMatcher;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
-import javax.ws.rs.core.StreamingOutput;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class QueryResourceTest
 {
-  private static final QueryToolChestWarehouse WAREHOUSE = new MapQueryToolChestWarehouse(ImmutableMap.of());
+  private static final DefaultQueryRunnerFactoryConglomerate CONGLOMERATE = DefaultQueryRunnerFactoryConglomerate.buildFromQueryRunnerFactories(
+      ImmutableMap.of());
   private static final AuthenticationResult AUTHENTICATION_RESULT =
       new AuthenticationResult("druid", "druid", null, null);
 
@@ -216,7 +241,7 @@ public class QueryResourceTest
   {
     return new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -246,12 +271,12 @@ public class QueryResourceTest
   @Test
   public void testGoodQueryWithQueryConfigOverrideDefault() throws IOException
   {
-    String overrideConfigKey = "priority";
-    String overrideConfigValue = "678";
+    final String overrideConfigKey = "priority";
+    final String overrideConfigValue = "678";
     DefaultQueryConfig overrideConfig = new DefaultQueryConfig(ImmutableMap.of(overrideConfigKey, overrideConfigValue));
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -276,7 +301,7 @@ public class QueryResourceTest
 
     final List<Result<TimeBoundaryResultValue>> responses = jsonMapper.readValue(
         response.baos.toByteArray(),
-        new TypeReference<List<Result<TimeBoundaryResultValue>>>()
+        new TypeReference<>()
         {
         }
     );
@@ -297,6 +322,289 @@ public class QueryResourceTest
   }
 
   @Test
+  public void testGoodQueryThrowsDruidExceptionFromLifecycleExecute() throws IOException
+  {
+    String overrideConfigKey = "priority";
+    String overrideConfigValue = "678";
+    DefaultQueryConfig overrideConfig = new DefaultQueryConfig(ImmutableMap.of(overrideConfigKey, overrideConfigValue));
+    queryResource = new QueryResource(
+        new QueryLifecycleFactory(
+            CONGLOMERATE,
+            new QuerySegmentWalker()
+            {
+              @Override
+              public <T> QueryRunner<T> getQueryRunnerForIntervals(
+                  Query<T> query,
+                  Iterable<Interval> intervals
+              )
+              {
+                throw DruidException.forPersona(DruidException.Persona.OPERATOR)
+                                    .ofCategory(DruidException.Category.RUNTIME_FAILURE)
+                                    .build("failing for coverage!");
+              }
+
+              @Override
+              public <T> QueryRunner<T> getQueryRunnerForSegments(
+                  Query<T> query,
+                  Iterable<SegmentDescriptor> specs
+              )
+              {
+                throw new UnsupportedOperationException();
+              }
+            },
+            new DefaultGenericQueryMetricsFactory(),
+            new NoopServiceEmitter(),
+            testRequestLogger,
+            new AuthConfig(),
+            AuthTestUtils.TEST_AUTHORIZER_MAPPER,
+            Suppliers.ofInstance(overrideConfig)
+        ),
+        jsonMapper,
+        smileMapper,
+        queryScheduler,
+        new AuthConfig(),
+        null,
+        ResponseContextConfig.newConfig(true),
+        DRUID_NODE
+    );
+
+    expectPermissiveHappyPathAuth();
+
+    final Response response = expectSynchronousRequestFlow(SIMPLE_TIMESERIES_QUERY);
+    Assert.assertEquals(Status.INTERNAL_SERVER_ERROR.getStatusCode(), response.getStatus());
+
+    final ErrorResponse entity = (ErrorResponse) response.getEntity();
+    MatcherAssert.assertThat(
+        entity.getUnderlyingException(),
+        new DruidExceptionMatcher(DruidException.Persona.OPERATOR, DruidException.Category.RUNTIME_FAILURE, "general")
+            .expectMessageIs("failing for coverage!")
+    );
+
+    Assert.assertEquals(1, testRequestLogger.getNativeQuerylogs().size());
+    Assert.assertNotNull(testRequestLogger.getNativeQuerylogs().get(0).getQuery());
+    Assert.assertNotNull(testRequestLogger.getNativeQuerylogs().get(0).getQuery().getContext());
+    Assert.assertTrue(testRequestLogger.getNativeQuerylogs()
+                                       .get(0)
+                                       .getQuery()
+                                       .getContext()
+                                       .containsKey(overrideConfigKey));
+    Assert.assertEquals(
+        overrideConfigValue,
+        testRequestLogger.getNativeQuerylogs().get(0).getQuery().getContext().get(overrideConfigKey)
+    );
+  }
+
+  @Test
+  public void testResponseWithIncludeTrailerHeader() throws IOException
+  {
+    queryResource = new QueryResource(
+        new QueryLifecycleFactory(
+            CONGLOMERATE,
+            new QuerySegmentWalker()
+            {
+              @Override
+              public <T> QueryRunner<T> getQueryRunnerForIntervals(
+                  Query<T> query,
+                  Iterable<Interval> intervals
+              )
+              {
+                return (queryPlus, responseContext) -> new Sequence<T>()
+                {
+                  @Override
+                  public <OutType> OutType accumulate(OutType initValue, Accumulator<OutType, T> accumulator)
+                  {
+                    if (accumulator instanceof QueryResultPusher.StreamingHttpResponseAccumulator) {
+                      try {
+                        ((QueryResultPusher.StreamingHttpResponseAccumulator) accumulator).flush(); // initialized
+                      }
+                      catch (IOException ignore) {
+                      }
+                    }
+
+                    throw new QueryTimeoutException();
+                  }
+
+                  @Override
+                  public <OutType> Yielder<OutType> toYielder(
+                      OutType initValue,
+                      YieldingAccumulator<OutType, T> accumulator
+                  )
+                  {
+                    return Yielders.done(initValue, null);
+                  }
+                };
+              }
+
+              @Override
+              public <T> QueryRunner<T> getQueryRunnerForSegments(
+                  Query<T> query,
+                  Iterable<SegmentDescriptor> specs
+              )
+              {
+                throw new UnsupportedOperationException();
+              }
+            },
+            new DefaultGenericQueryMetricsFactory(),
+            new NoopServiceEmitter(),
+            testRequestLogger,
+            new AuthConfig(),
+            AuthTestUtils.TEST_AUTHORIZER_MAPPER,
+            Suppliers.ofInstance(new DefaultQueryConfig(ImmutableMap.of()))
+        ),
+        jsonMapper,
+        smileMapper,
+        queryScheduler,
+        new AuthConfig(),
+        null,
+        ResponseContextConfig.newConfig(true),
+        DRUID_NODE
+    );
+
+    expectPermissiveHappyPathAuth();
+
+    org.eclipse.jetty.server.Response response = this.jettyResponseforRequest(testServletRequest);
+    Assert.assertNull(queryResource.doPost(new ByteArrayInputStream(
+                                               SIMPLE_TIMESERIES_QUERY.getBytes(StandardCharsets.UTF_8)),
+                                           null /*pretty*/,
+                                           testServletRequest
+    ));
+    Assert.assertTrue(response.containsHeader(HttpHeader.TRAILER.toString()));
+    Assert.assertEquals(response.getHeader(HttpHeader.TRAILER.toString()), QueryResultPusher.RESULT_TRAILER_HEADERS);
+
+    final HttpFields fields = response.getTrailers().get();
+    Assert.assertTrue(fields.containsKey(QueryResource.ERROR_MESSAGE_TRAILER_HEADER));
+    Assert.assertEquals(
+        fields.get(QueryResource.ERROR_MESSAGE_TRAILER_HEADER),
+        "Query did not complete within configured timeout period. You can increase query timeout or tune the performance of query."
+    );
+
+    Assert.assertTrue(fields.containsKey(QueryResource.RESPONSE_COMPLETE_TRAILER_HEADER));
+    Assert.assertEquals(fields.get(QueryResource.RESPONSE_COMPLETE_TRAILER_HEADER), "false");
+  }
+
+  @Test
+  public void testSuccessResponseWithTrailerHeader() throws IOException
+  {
+    queryResource = new QueryResource(
+        new QueryLifecycleFactory(
+            CONGLOMERATE,
+            TEST_SEGMENT_WALKER,
+            new DefaultGenericQueryMetricsFactory(),
+            new NoopServiceEmitter(),
+            testRequestLogger,
+            new AuthConfig(),
+            AuthTestUtils.TEST_AUTHORIZER_MAPPER,
+            Suppliers.ofInstance(new DefaultQueryConfig(ImmutableMap.of()))
+        ),
+        jsonMapper,
+        smileMapper,
+        queryScheduler,
+        new AuthConfig(),
+        null,
+        ResponseContextConfig.newConfig(true),
+        DRUID_NODE
+    );
+
+    expectPermissiveHappyPathAuth();
+
+    org.eclipse.jetty.server.Response response = this.jettyResponseforRequest(testServletRequest);
+    Assert.assertNull(queryResource.doPost(new ByteArrayInputStream(
+                                               SIMPLE_TIMESERIES_QUERY.getBytes(StandardCharsets.UTF_8)),
+                                           null /*pretty*/,
+                                           testServletRequest
+    ));
+    Assert.assertTrue(response.containsHeader(HttpHeader.TRAILER.toString()));
+
+    final HttpFields fields = response.getTrailers().get();
+    Assert.assertFalse(fields.containsKey(QueryResource.ERROR_MESSAGE_TRAILER_HEADER));
+
+    Assert.assertTrue(fields.containsKey(QueryResource.RESPONSE_COMPLETE_TRAILER_HEADER));
+    Assert.assertEquals(fields.get(QueryResource.RESPONSE_COMPLETE_TRAILER_HEADER), "true");
+  }
+
+  @Test
+  public void testQueryThrowsRuntimeExceptionFromLifecycleExecute() throws IOException
+  {
+    String embeddedExceptionMessage = "Embedded Exception Message!";
+    String overrideConfigKey = "priority";
+    String overrideConfigValue = "678";
+
+    DefaultQueryConfig overrideConfig = new DefaultQueryConfig(ImmutableMap.of(overrideConfigKey, overrideConfigValue));
+    QuerySegmentWalker querySegmentWalker = new QuerySegmentWalker()
+    {
+      @Override
+      public <T> QueryRunner<T> getQueryRunnerForIntervals(
+          Query<T> query,
+          Iterable<Interval> intervals
+      )
+      {
+        throw new RuntimeException("something", new RuntimeException(embeddedExceptionMessage));
+      }
+
+      @Override
+      public <T> QueryRunner<T> getQueryRunnerForSegments(
+          Query<T> query,
+          Iterable<SegmentDescriptor> specs
+      )
+      {
+        throw new UnsupportedOperationException();
+      }
+    };
+
+    queryResource = new QueryResource(
+
+        new QueryLifecycleFactory(null, null, null, null, null, null, null, Suppliers.ofInstance(overrideConfig))
+        {
+          @Override
+          public QueryLifecycle factorize()
+          {
+            return new QueryLifecycle(
+                CONGLOMERATE,
+                querySegmentWalker,
+                new DefaultGenericQueryMetricsFactory(),
+                new NoopServiceEmitter(),
+                testRequestLogger,
+                AuthTestUtils.TEST_AUTHORIZER_MAPPER,
+                overrideConfig,
+                new AuthConfig(),
+                System.currentTimeMillis(),
+                System.nanoTime()
+            )
+            {
+              @Override
+              public void emitLogsAndMetrics(@Nullable Throwable e, @Nullable String remoteAddress, long bytesWritten)
+              {
+                Assert.assertTrue(Throwables.getStackTraceAsString(e).contains(embeddedExceptionMessage));
+              }
+            };
+          }
+        },
+        jsonMapper,
+        smileMapper,
+        queryScheduler,
+        new AuthConfig(),
+        null,
+        ResponseContextConfig.newConfig(true),
+        DRUID_NODE
+    );
+
+    expectPermissiveHappyPathAuth();
+
+    final Response response = expectSynchronousRequestFlow(SIMPLE_TIMESERIES_QUERY);
+    Assert.assertEquals(Status.INTERNAL_SERVER_ERROR.getStatusCode(), response.getStatus());
+
+    final ErrorResponse entity = (ErrorResponse) response.getEntity();
+    MatcherAssert.assertThat(
+        entity.getUnderlyingException(),
+        new DruidExceptionMatcher(
+            DruidException.Persona.OPERATOR,
+            DruidException.Category.RUNTIME_FAILURE, "legacyQueryException"
+        )
+            .expectMessageIs("something")
+    );
+  }
+
+  @Test
   public void testGoodQueryWithQueryConfigDoesNotOverrideQueryContext() throws IOException
   {
     String overrideConfigKey = "priority";
@@ -304,7 +612,7 @@ public class QueryResourceTest
     DefaultQueryConfig overrideConfig = new DefaultQueryConfig(ImmutableMap.of(overrideConfigKey, overrideConfigValue));
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -328,7 +636,7 @@ public class QueryResourceTest
 
     final List<Result<TimeBoundaryResultValue>> responses = jsonMapper.readValue(
         response.baos.toByteArray(),
-        new TypeReference<List<Result<TimeBoundaryResultValue>>>()
+        new TypeReference<>()
         {
         }
     );
@@ -529,7 +837,7 @@ public class QueryResourceTest
           public Access authorize(AuthenticationResult authenticationResult, Resource resource, Action action)
           {
             if (resource.getName().equals("allow")) {
-              return new Access(true);
+              return Access.allowWithRestriction(RowFilterPolicy.from(new NullFilter("col", null)));
             } else {
               return new Access(false);
             }
@@ -541,7 +849,7 @@ public class QueryResourceTest
 
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -579,7 +887,7 @@ public class QueryResourceTest
 
     final List<Result<TimeBoundaryResultValue>> responses = jsonMapper.readValue(
         response.baos.toByteArray(),
-        new TypeReference<List<Result<TimeBoundaryResultValue>>>()
+        new TypeReference<>()
         {
         }
     );
@@ -616,7 +924,7 @@ public class QueryResourceTest
 
     final QueryResource timeoutQueryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             timeoutSegmentWalker,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -642,11 +950,23 @@ public class QueryResourceTest
     );
     Assert.assertEquals(QueryTimeoutException.STATUS_CODE, response.getStatus());
 
+    ErrorResponse entity = (ErrorResponse) response.getEntity();
+    MatcherAssert.assertThat(
+        entity.getUnderlyingException(),
+        new DruidExceptionMatcher(
+            DruidException.Persona.OPERATOR,
+            DruidException.Category.TIMEOUT,
+            "legacyQueryException"
+        )
+            .expectMessageIs(
+                "Query did not complete within configured timeout period. You can increase query timeout or tune the performance of query.")
+    );
+
     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    ((StreamingOutput) response.getEntity()).write(baos);
+    jsonMapper.writeValue(baos, entity);
     QueryTimeoutException ex = jsonMapper.readValue(baos.toByteArray(), QueryTimeoutException.class);
     Assert.assertEquals("Query did not complete within configured timeout period. You can " +
-        "increase query timeout or tune the performance of query.", ex.getMessage());
+                        "increase query timeout or tune the performance of query.", ex.getMessage());
     Assert.assertEquals(QueryException.QUERY_TIMEOUT_ERROR_CODE, ex.getErrorCode());
     Assert.assertEquals(1, timeoutQueryResource.getTimedOutQueryCount());
 
@@ -700,7 +1020,7 @@ public class QueryResourceTest
 
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -807,7 +1127,7 @@ public class QueryResourceTest
 
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             TEST_SEGMENT_WALKER,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -874,41 +1194,55 @@ public class QueryResourceTest
   }
 
   @Test(timeout = 10_000L)
-  public void testTooManyQuery() throws InterruptedException
+  public void testTooManyQuery() throws InterruptedException, ExecutionException
   {
     expectPermissiveHappyPathAuth();
 
     final CountDownLatch waitTwoScheduled = new CountDownLatch(2);
-    final CountDownLatch waitAllFinished = new CountDownLatch(3);
     final QueryScheduler laningScheduler = new QueryScheduler(
         2,
         ManualQueryPrioritizationStrategy.INSTANCE,
         NoQueryLaningStrategy.INSTANCE,
-        new ServerConfig()
+        // enable total laning
+        new ServerConfig(false)
     );
 
+    ArrayList<Future<Boolean>> back2 = new ArrayList<>();
+
     createScheduledQueryResource(laningScheduler, Collections.emptyList(), ImmutableList.of(waitTwoScheduled));
-    assertAsyncResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus())
-    );
-    assertAsyncResponseAndCountdownOrBlockForever(
+    ));
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> Assert.assertEquals(Status.OK.getStatusCode(), response.getStatus())
-    );
+    ));
     waitTwoScheduled.await();
-    assertSynchronousResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyaAssertSynchronousResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> {
           Assert.assertEquals(QueryCapacityExceededException.STATUS_CODE, response.getStatus());
           QueryCapacityExceededException ex;
 
+          final ErrorResponse entity = (ErrorResponse) response.getEntity();
+          MatcherAssert.assertThat(
+              entity.getUnderlyingException(),
+              new DruidExceptionMatcher(
+                  DruidException.Persona.OPERATOR,
+                  DruidException.Category.CAPACITY_EXCEEDED,
+                  "legacyQueryException"
+              )
+                  .expectMessageIs(
+                      "Too many concurrent queries, total query capacity of 2 exceeded. Please try your query again later.")
+          );
+
           try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ((StreamingOutput) response.getEntity()).write(baos);
+            jsonMapper.writeValue(baos, entity);
+
+            // Here we are converting to a QueryCapacityExceededException.  This is just to validate legacy stuff.
+            // When we delete the QueryException class, we can just rely on validating the DruidException instead
             ex = jsonMapper.readValue(baos.toByteArray(), QueryCapacityExceededException.class);
           }
           catch (IOException e) {
@@ -917,17 +1251,21 @@ public class QueryResourceTest
           Assert.assertEquals(QueryCapacityExceededException.makeTotalErrorMessage(2), ex.getMessage());
           Assert.assertEquals(QueryException.QUERY_CAPACITY_EXCEEDED_ERROR_CODE, ex.getErrorCode());
         }
-    );
-    waitAllFinished.await();
+    ));
+
+    for (Future<Boolean> theFuture : back2) {
+      Assert.assertTrue(theFuture.get());
+    }
+    Assert.assertEquals(2, queryResource.getSuccessfulQueryCount());
+    Assert.assertEquals(1, queryResource.getFailedQueryCount());
   }
 
   @Test(timeout = 10_000L)
-  public void testTooManyQueryInLane() throws InterruptedException
+  public void testTooManyQueryInLane() throws InterruptedException, ExecutionException
   {
     expectPermissiveHappyPathAuth();
     final CountDownLatch waitTwoStarted = new CountDownLatch(2);
     final CountDownLatch waitOneScheduled = new CountDownLatch(1);
-    final CountDownLatch waitAllFinished = new CountDownLatch(3);
     final QueryScheduler scheduler = new QueryScheduler(
         40,
         ManualQueryPrioritizationStrategy.INSTANCE,
@@ -935,23 +1273,39 @@ public class QueryResourceTest
         new ServerConfig()
     );
 
+    ArrayList<Future<Boolean>> back2 = new ArrayList<>();
+
     createScheduledQueryResource(scheduler, ImmutableList.of(waitTwoStarted), ImmutableList.of(waitOneScheduled));
 
-    assertAsyncResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY_LOW_PRIORITY,
-        waitAllFinished,
         response -> Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus())
-    );
+    ));
     waitOneScheduled.await();
-    assertSynchronousResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyaAssertSynchronousResponse(
         SIMPLE_TIMESERIES_QUERY_LOW_PRIORITY,
-        waitAllFinished,
         response -> {
           Assert.assertEquals(QueryCapacityExceededException.STATUS_CODE, response.getStatus());
           QueryCapacityExceededException ex;
+
+          final ErrorResponse entity = (ErrorResponse) response.getEntity();
+          MatcherAssert.assertThat(
+              entity.getUnderlyingException(),
+              new DruidExceptionMatcher(
+                  DruidException.Persona.OPERATOR,
+                  DruidException.Category.CAPACITY_EXCEEDED,
+                  "legacyQueryException"
+              )
+                  .expectMessageIs(
+                      "Too many concurrent queries for lane 'low', query capacity of 1 exceeded. Please try your query again later.")
+          );
+
           try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ((StreamingOutput) response.getEntity()).write(baos);
+            jsonMapper.writeValue(baos, entity);
+
+            // Here we are converting to a QueryCapacityExceededException.  This is just to validate legacy stuff.
+            // When we delete the QueryException class, we can just rely on validating the DruidException instead
             ex = jsonMapper.readValue(baos.toByteArray(), QueryCapacityExceededException.class);
           }
           catch (IOException e) {
@@ -964,48 +1318,63 @@ public class QueryResourceTest
           Assert.assertEquals(QueryException.QUERY_CAPACITY_EXCEEDED_ERROR_CODE, ex.getErrorCode());
 
         }
-    );
+    ));
     waitTwoStarted.await();
-    assertAsyncResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus())
-    );
+    ));
 
-    waitAllFinished.await();
+    for (Future<Boolean> theFuture : back2) {
+      Assert.assertTrue(theFuture.get());
+    }
   }
 
   @Test(timeout = 10_000L)
-  public void testTooManyQueryInLaneImplicitFromDurationThreshold() throws InterruptedException
+  public void testTooManyQueryInLaneImplicitFromDurationThreshold() throws InterruptedException, ExecutionException
   {
     expectPermissiveHappyPathAuth();
     final CountDownLatch waitTwoStarted = new CountDownLatch(2);
     final CountDownLatch waitOneScheduled = new CountDownLatch(1);
-    final CountDownLatch waitAllFinished = new CountDownLatch(3);
     final QueryScheduler scheduler = new QueryScheduler(
         40,
-        new ThresholdBasedQueryPrioritizationStrategy(null, "P90D", null, null),
+        new ThresholdBasedQueryPrioritizationStrategy(null, "P90D", null, null, null),
         new HiLoQueryLaningStrategy(1),
         new ServerConfig()
     );
 
+    ArrayList<Future<Boolean>> back2 = new ArrayList<>();
     createScheduledQueryResource(scheduler, ImmutableList.of(waitTwoStarted), ImmutableList.of(waitOneScheduled));
 
-    assertAsyncResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus())
-    );
+    ));
     waitOneScheduled.await();
-    assertSynchronousResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyaAssertSynchronousResponse(
         SIMPLE_TIMESERIES_QUERY,
-        waitAllFinished,
         response -> {
           Assert.assertEquals(QueryCapacityExceededException.STATUS_CODE, response.getStatus());
           QueryCapacityExceededException ex;
+
+          final ErrorResponse entity = (ErrorResponse) response.getEntity();
+          MatcherAssert.assertThat(
+              entity.getUnderlyingException(),
+              new DruidExceptionMatcher(
+                  DruidException.Persona.OPERATOR,
+                  DruidException.Category.CAPACITY_EXCEEDED,
+                  "legacyQueryException"
+              )
+                  .expectMessageIs(
+                      "Too many concurrent queries for lane 'low', query capacity of 1 exceeded. Please try your query again later.")
+          );
+
           try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ((StreamingOutput) response.getEntity()).write(baos);
+            jsonMapper.writeValue(baos, entity);
+
+            // Here we are converting to a QueryCapacityExceededException.  This is just to validate legacy stuff.
+            // When we delete the QueryException class, we can just rely on validating the DruidException instead
             ex = jsonMapper.readValue(baos.toByteArray(), QueryCapacityExceededException.class);
           }
           catch (IOException e) {
@@ -1017,15 +1386,56 @@ public class QueryResourceTest
           );
           Assert.assertEquals(QueryException.QUERY_CAPACITY_EXCEEDED_ERROR_CODE, ex.getErrorCode());
         }
-    );
+    ));
     waitTwoStarted.await();
-    assertAsyncResponseAndCountdownOrBlockForever(
+    back2.add(eventuallyAssertAsyncResponse(
         SIMPLE_TIMESERIES_QUERY_SMALLISH_INTERVAL,
-        waitAllFinished,
         response -> Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus())
+    ));
+
+    for (Future<Boolean> theFuture : back2) {
+      Assert.assertTrue(theFuture.get());
+    }
+  }
+
+  @Test
+  public void testNativeQueryWriter_goodResponse() throws IOException
+  {
+    final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    final QueryResultPusher.Writer writer = new QueryResource.NativeQueryWriter(jsonMapper, baos);
+    writer.writeResponseStart();
+    writer.writeRow(Arrays.asList("foo", "bar"));
+    writer.writeRow(Collections.singletonList("baz"));
+    writer.writeResponseEnd();
+    writer.close();
+
+    Assert.assertEquals(
+        ImmutableList.of(
+            ImmutableList.of("foo", "bar"),
+            ImmutableList.of("baz")
+        ),
+        jsonMapper.readValue(baos.toByteArray(), Object.class)
+    );
+  }
+
+  @Test
+  public void testNativeQueryWriter_truncatedResponse() throws IOException
+  {
+    final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    final QueryResultPusher.Writer writer = new QueryResource.NativeQueryWriter(jsonMapper, baos);
+    writer.writeResponseStart();
+    writer.writeRow(Arrays.asList("foo", "bar"));
+    writer.close(); // Simulate an error that occurs midstream; close writer without calling writeResponseEnd.
+
+    final JsonProcessingException e = Assert.assertThrows(
+        JsonProcessingException.class,
+        () -> jsonMapper.readValue(baos.toByteArray(), Object.class)
     );
 
-    waitAllFinished.await();
+    MatcherAssert.assertThat(
+        e,
+        ThrowableMessageMatcher.hasMessage(CoreMatchers.containsString("expected close marker for Array"))
+    );
   }
 
   private void createScheduledQueryResource(
@@ -1071,7 +1481,7 @@ public class QueryResourceTest
 
     queryResource = new QueryResource(
         new QueryLifecycleFactory(
-            WAREHOUSE,
+            CONGLOMERATE,
             texasRanger,
             new DefaultGenericQueryMetricsFactory(),
             new NoopServiceEmitter(),
@@ -1090,20 +1500,19 @@ public class QueryResourceTest
     );
   }
 
-  private void assertAsyncResponseAndCountdownOrBlockForever(
+  private Future<Boolean> eventuallyAssertAsyncResponse(
       String query,
-      CountDownLatch done,
       Consumer<MockHttpServletResponse> asserts
   )
   {
-    Executors.newSingleThreadExecutor().submit(() -> {
+    return Executors.newSingleThreadExecutor().submit(() -> {
       try {
         asserts.accept(expectAsyncRequestFlow(query, testServletRequest.mimic()));
       }
       catch (IOException e) {
         throw new RuntimeException(e);
       }
-      done.countDown();
+      return true;
     });
   }
 
@@ -1139,7 +1548,8 @@ public class QueryResourceTest
   @Nonnull
   private MockHttpServletResponse expectAsyncRequestFlow(
       MockHttpServletRequest req,
-      byte[] queryBytes, QueryResource queryResource
+      byte[] queryBytes,
+      QueryResource queryResource
   ) throws IOException
   {
     final MockHttpServletResponse response = MockHttpServletResponse.forRequest(req);
@@ -1152,13 +1562,12 @@ public class QueryResourceTest
     return response;
   }
 
-  private void assertSynchronousResponseAndCountdownOrBlockForever(
+  private Future<Boolean> eventuallyaAssertSynchronousResponse(
       String query,
-      CountDownLatch done,
       Consumer<Response> asserts
   )
   {
-    Executors.newSingleThreadExecutor().submit(() -> {
+    return Executors.newSingleThreadExecutor().submit(() -> {
       try {
         asserts.accept(
             expectSynchronousRequestFlow(
@@ -1171,8 +1580,17 @@ public class QueryResourceTest
       catch (IOException e) {
         throw new RuntimeException(e);
       }
-      done.countDown();
+      return true;
     });
+  }
+
+  private Response expectSynchronousRequestFlow(String simpleTimeseriesQuery) throws IOException
+  {
+    return expectSynchronousRequestFlow(
+        testServletRequest,
+        simpleTimeseriesQuery.getBytes(StandardCharsets.UTF_8),
+        queryResource
+    );
   }
 
   private Response expectSynchronousRequestFlow(
@@ -1182,5 +1600,30 @@ public class QueryResourceTest
   ) throws IOException
   {
     return queryResource.doPost(new ByteArrayInputStream(bytes), null, req);
+  }
+
+  private org.eclipse.jetty.server.Response jettyResponseforRequest(MockHttpServletRequest req) throws IOException
+  {
+    HttpChannel channelMock = EasyMock.mock(HttpChannel.class);
+    HttpOutput outputMock = EasyMock.mock(HttpOutput.class);
+    org.eclipse.jetty.server.Response response = new org.eclipse.jetty.server.Response(channelMock, outputMock);
+
+    EasyMock.expect(channelMock.isSendError()).andReturn(false);
+    EasyMock.expect(channelMock.isCommitted()).andReturn(true);
+
+    outputMock.close();
+    EasyMock.expectLastCall().andVoid();
+
+    outputMock.write(EasyMock.anyObject(byte[].class), EasyMock.anyInt(), EasyMock.anyInt());
+    EasyMock.expectLastCall().andVoid();
+
+    EasyMock.replay(outputMock, channelMock);
+
+    req.newAsyncContext(() -> {
+      final MockAsyncContext retVal = new MockAsyncContext();
+      retVal.response = response;
+      return retVal;
+    });
+    return response;
   }
 }

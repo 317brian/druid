@@ -30,20 +30,20 @@ export interface ExecutionDetailsPaneLoaderProps {
   id: string;
   initTab?: ExecutionDetailsTab;
   initExecution?: Execution;
-  goToIngestion(taskId: string): void;
+  goToTask(taskId: string): void;
 }
 
 export const ExecutionDetailsPaneLoader = React.memo(function ExecutionDetailsPaneLoader(
   props: ExecutionDetailsPaneLoaderProps,
 ) {
-  const { id, initTab, initExecution, goToIngestion } = props;
+  const { id, initTab, initExecution, goToTask } = props;
 
   const [executionState, queryManager] = useQueryManager<string, Execution>({
-    processQuery: (id: string) => {
-      return getTaskExecution(id);
-    },
     initQuery: initExecution ? undefined : id,
     initState: initExecution ? new QueryState({ data: initExecution }) : undefined,
+    processQuery: (id, cancelToken) => {
+      return getTaskExecution(id, undefined, cancelToken);
+    },
   });
 
   useInterval(() => {
@@ -56,9 +56,7 @@ export const ExecutionDetailsPaneLoader = React.memo(function ExecutionDetailsPa
 
   const execution = executionState.getSomeData();
   if (execution) {
-    return (
-      <ExecutionDetailsPane execution={execution} initTab={initTab} goToIngestion={goToIngestion} />
-    );
+    return <ExecutionDetailsPane execution={execution} initTab={initTab} goToTask={goToTask} />;
   } else if (executionState.isLoading()) {
     return <Loader className="execution-stages-pane" />;
   } else if (executionState.isError()) {

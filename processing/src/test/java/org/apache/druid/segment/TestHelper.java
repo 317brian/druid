@@ -19,6 +19,7 @@
 
 package org.apache.druid.segment;
 
+import com.fasterxml.jackson.annotation.JacksonInject;
 import com.fasterxml.jackson.databind.AnnotationIntrospector;
 import com.fasterxml.jackson.databind.InjectableValues;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,8 +41,6 @@ import org.apache.druid.query.groupby.ResultRow;
 import org.apache.druid.query.timeseries.TimeseriesResultValue;
 import org.apache.druid.query.topn.TopNResultValue;
 import org.apache.druid.segment.column.ColumnConfig;
-import org.apache.druid.segment.data.ComparableList;
-import org.apache.druid.segment.data.ComparableStringArray;
 import org.apache.druid.segment.join.JoinableFactoryWrapper;
 import org.apache.druid.segment.writeout.SegmentWriteOutMediumFactory;
 import org.apache.druid.timeline.DataSegment.PruneSpecsHolder;
@@ -62,40 +61,40 @@ import java.util.stream.IntStream;
 public class TestHelper
 {
   public static final ObjectMapper JSON_MAPPER = makeJsonMapper();
-  public static final ColumnConfig NO_CACHE_ALWAYS_USE_INDEXES_COLUMN_CONFIG = new ColumnConfig()
-  {
-    @Override
-    public int columnCacheSizeBytes()
-    {
-      return 0;
-    }
-
-    @Override
-    public double skipValueRangeIndexScale()
-    {
-      return 1.0;
-    }
-
-    @Override
-    public double skipValuePredicateIndexScale()
-    {
-      return 1.0;
-    }
-  };
 
   public static IndexMergerV9 getTestIndexMergerV9(SegmentWriteOutMediumFactory segmentWriteOutMediumFactory)
   {
     return new IndexMergerV9(JSON_MAPPER, getTestIndexIO(), segmentWriteOutMediumFactory, true);
   }
 
+  public static IndexMergerV9 getTestIndexMergerV9(ObjectMapper jsonMapper, SegmentWriteOutMediumFactory segmentWriteOutMediumFactory)
+  {
+    return new IndexMergerV9(jsonMapper, getTestIndexIO(jsonMapper), segmentWriteOutMediumFactory, true);
+  }
+
+  public static IndexMergerV9 getTestIndexMergerV9(SegmentWriteOutMediumFactory segmentWriteOutMediumFactory, ColumnConfig columnConfig)
+  {
+    return new IndexMergerV9(JSON_MAPPER, getTestIndexIO(columnConfig), segmentWriteOutMediumFactory, true);
+  }
+
   public static IndexIO getTestIndexIO()
   {
-    return getTestIndexIO(NO_CACHE_ALWAYS_USE_INDEXES_COLUMN_CONFIG);
+    return getTestIndexIO(ColumnConfig.SELECTION_SIZE);
   }
 
   public static IndexIO getTestIndexIO(ColumnConfig columnConfig)
   {
     return new IndexIO(JSON_MAPPER, columnConfig);
+  }
+
+  public static IndexIO getTestIndexIO(ObjectMapper jsonMapper, ColumnConfig columnConfig)
+  {
+    return new IndexIO(jsonMapper, columnConfig);
+  }
+
+  public static IndexIO getTestIndexIO(ObjectMapper jsonMapper)
+  {
+    return new IndexIO(jsonMapper, ColumnConfig.SELECTION_SIZE);
   }
 
   public static AnnotationIntrospector makeAnnotationIntrospector()
@@ -105,7 +104,7 @@ public class TestHelper
     return new GuiceAnnotationIntrospector()
     {
       @Override
-      public Object findInjectableValueId(AnnotatedMember m)
+      public JacksonInject.Value findInjectableValue(AnnotatedMember m)
       {
         return null;
       }
@@ -281,7 +280,7 @@ public class TestHelper
       final Object next = resultsIter.next();
       final Object next2 = resultsIter2.next();
 
-      String failMsg = msg + "-" + index++;
+      String failMsg = msg + "[" + index++ + "]";
       String failMsg2 = StringUtils.format(
           "%s: Second iterator bad, multiple calls to iterator() should be safe",
           failMsg
@@ -386,9 +385,14 @@ public class TestHelper
     final Map<String, Object> expectedMap = ((MapBasedRow) expected).getEvent();
     final Map<String, Object> actualMap = ((MapBasedRow) actual).getEvent();
 
-    Assert.assertEquals(StringUtils.format("%s: map keys", msg), expectedMap.keySet(), actualMap.keySet());
     for (final String key : expectedMap.keySet()) {
       final Object expectedValue = expectedMap.get(key);
+      if (!actualMap.containsKey(key)) {
+        Assert.fail(
+            StringUtils.format("%s: Expected key [%s] to exist, but it did not [%s]", msg, key, actualMap.keySet())
+        );
+      }
+
       final Object actualValue = actualMap.get(key);
 
       if (expectedValue != null && expectedValue.getClass().isArray()) {
@@ -408,6 +412,9 @@ public class TestHelper
         );
       }
     }
+    // Given that we iterated through all of the keys in one, checking that the key exists in the other, then if they
+    // have the same size, they must have the same keyset.
+    Assert.assertEquals(expectedMap.size(), actualMap.size());
   }
 
   public static void assertRow(String msg, ResultRow expected, ResultRow actual)
@@ -440,21 +447,14 @@ public class TestHelper
           );
         }
       } else if (expectedValue instanceof Float || expectedValue instanceof Double) {
+        if (actualValue == null) {
+          Assert.fail(message + ": failed because expected numeric value is actually null");
+        }
         Assert.assertEquals(
             message,
             ((Number) expectedValue).doubleValue(),
             ((Number) actualValue).doubleValue(),
             Math.abs(((Number) expectedValue).doubleValue() * 1e-6)
-        );
-      } else if (expectedValue instanceof ComparableStringArray && actualValue instanceof List) {
-        Assert.assertArrayEquals(
-            ((ComparableStringArray) expectedValue).getDelegate(),
-            ExprEval.coerceListToArray((List) actualValue, true).rhs
-        );
-      } else if (expectedValue instanceof ComparableList && actualValue instanceof List) {
-        Assert.assertArrayEquals(
-            ((ComparableList) expectedValue).getDelegate().toArray(new Object[0]),
-            ExprEval.coerceListToArray((List) actualValue, true).rhs
         );
       } else {
         Assert.assertEquals(

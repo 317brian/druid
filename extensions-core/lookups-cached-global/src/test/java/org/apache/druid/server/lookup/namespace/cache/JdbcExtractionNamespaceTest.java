@@ -26,7 +26,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.concurrent.Execs;
@@ -69,10 +68,6 @@ import java.util.concurrent.locks.ReentrantLock;
 @RunWith(Parameterized.class)
 public class JdbcExtractionNamespaceTest
 {
-  static {
-    NullHandling.initializeForTests();
-  }
-
   @Rule
   public final TestDerbyConnector.DerbyConnectorRule derbyConnectorRule = new TestDerbyConnector.DerbyConnectorRule();
 
@@ -328,6 +323,8 @@ public class JdbcExtractionNamespaceTest
         null,
         new Period(0),
         null,
+        0,
+        null,
         new JdbcAccessSecurityConfig()
     );
     try (CacheScheduler.Entry entry = scheduler.schedule(extractionNamespace)) {
@@ -340,8 +337,8 @@ public class JdbcExtractionNamespaceTest
         String field = val[0];
         Assert.assertEquals(
             "non-null check",
-            NullHandling.emptyToNullIfNeeded(field),
-            NullHandling.emptyToNullIfNeeded(map.get(key))
+            field,
+            map.get(key)
         );
       }
       Assert.assertEquals("null check", null, map.get("baz"));
@@ -361,6 +358,8 @@ public class JdbcExtractionNamespaceTest
         FILTER_COLUMN + "='1'",
         new Period(0),
         null,
+        0,
+        null,
         new JdbcAccessSecurityConfig()
     );
     try (CacheScheduler.Entry entry = scheduler.schedule(extractionNamespace)) {
@@ -376,13 +375,43 @@ public class JdbcExtractionNamespaceTest
         if ("1".equals(filterVal)) {
           Assert.assertEquals(
               "non-null check",
-              NullHandling.emptyToNullIfNeeded(field),
-              NullHandling.emptyToNullIfNeeded(map.get(key))
+              field,
+              map.get(key)
           );
         } else {
-          Assert.assertEquals("non-null check", null, NullHandling.emptyToNullIfNeeded(map.get(key)));
+          Assert.assertEquals("non-null check", null, map.get(key));
         }
       }
+    }
+  }
+
+  @Test(timeout = 60_000L)
+  public void testEmptyTable()
+      throws InterruptedException
+  {
+    // Delete existing rows from table.
+    final Handle handle = derbyConnectorRule.getConnector().getDBI().open();
+    handle.createStatement(
+        StringUtils.format("DELETE FROM %s", TABLE_NAME)
+    ).setQueryTimeout(1).execute();
+
+    final JdbcExtractionNamespace extractionNamespace = new JdbcExtractionNamespace(
+        derbyConnectorRule.getMetadataConnectorConfig(),
+        TABLE_NAME,
+        KEY_NAME,
+        VAL_NAME,
+        tsColumn,
+        null,
+        new Period(0),
+        null,
+        0,
+        null,
+        new JdbcAccessSecurityConfig()
+    );
+    try (CacheScheduler.Entry entry = scheduler.schedule(extractionNamespace)) {
+      CacheSchedulerTest.waitFor(entry);
+      final Map<String, String> map = entry.getCache();
+      Assert.assertTrue(map.isEmpty());
     }
   }
 
@@ -397,6 +426,47 @@ public class JdbcExtractionNamespaceTest
       }
       assertUpdated(entry, "foo", "bar");
     }
+  }
+
+  @Test
+  public void testRandomJitter()
+  {
+    JdbcExtractionNamespace extractionNamespace = new JdbcExtractionNamespace(
+        derbyConnectorRule.getMetadataConnectorConfig(),
+        TABLE_NAME,
+        KEY_NAME,
+        VAL_NAME,
+        tsColumn,
+        FILTER_COLUMN + "='1'",
+        new Period(0),
+        null,
+        120,
+        null,
+        new JdbcAccessSecurityConfig()
+    );
+    long jitter = extractionNamespace.getJitterMills();
+    // jitter will be a random value between 0 and 120 seconds.
+    Assert.assertTrue(jitter >= 0 && jitter <= 120000);
+  }
+
+  @Test
+  public void testRandomJitterNotSpecified()
+  {
+    JdbcExtractionNamespace extractionNamespace = new JdbcExtractionNamespace(
+        derbyConnectorRule.getMetadataConnectorConfig(),
+        TABLE_NAME,
+        KEY_NAME,
+        VAL_NAME,
+        tsColumn,
+        FILTER_COLUMN + "='1'",
+        new Period(0),
+        null,
+        0,
+        null,
+        new JdbcAccessSecurityConfig()
+    );
+    // jitter will be a random value between 0 and 120 seconds.
+    Assert.assertEquals(0, extractionNamespace.getJitterMills());
   }
 
   @Test(timeout = 60_000L)
@@ -436,6 +506,8 @@ public class JdbcExtractionNamespaceTest
         "some filter",
         new Period(10),
         null,
+        0,
+        null,
         securityConfig
     );
     final ObjectMapper mapper = new DefaultObjectMapper();
@@ -460,6 +532,8 @@ public class JdbcExtractionNamespaceTest
         tsColumn,
         null,
         new Period(10),
+        null,
+        0,
         null,
         new JdbcAccessSecurityConfig()
     );

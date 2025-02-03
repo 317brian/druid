@@ -219,7 +219,7 @@ public class TestTaskRunner implements TaskRunner, QuerySegmentWalker
     runningItems.add(taskRunnerWorkItem);
     Futures.addCallback(
         statusFuture,
-        new FutureCallback<TaskStatus>()
+        new FutureCallback<>()
         {
           @Override
           public void onSuccess(TaskStatus result)
@@ -232,7 +232,8 @@ public class TestTaskRunner implements TaskRunner, QuerySegmentWalker
           {
             runningItems.remove(taskRunnerWorkItem);
           }
-        }
+        },
+        MoreExecutors.directExecutor()
     );
 
     return statusFuture;

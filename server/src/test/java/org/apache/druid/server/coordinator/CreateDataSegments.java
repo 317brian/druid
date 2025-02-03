@@ -24,10 +24,13 @@ import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.granularity.Granularities;
 import org.apache.druid.java.util.common.granularity.Granularity;
 import org.apache.druid.segment.IndexIO;
+import org.apache.druid.timeline.CompactionState;
 import org.apache.druid.timeline.DataSegment;
 import org.apache.druid.timeline.partition.NumberedShardSpec;
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,12 +42,17 @@ import java.util.Objects;
  */
 public class CreateDataSegments
 {
+  private static final DateTime DEFAULT_START = DateTimes.of("2012-10-24");
+
   private final String datasource;
 
-  private DateTime startTime;
-  private Granularity granularity;
+  private DateTime startTime = DEFAULT_START;
+  private Granularity granularity = Granularities.DAY;
   private int numPartitions = 1;
   private int numIntervals = 1;
+
+  private String version = "1";
+  private CompactionState compactionState = null;
 
   public static CreateDataSegments ofDatasource(String datasource)
   {
@@ -81,7 +89,24 @@ public class CreateDataSegments
     return this;
   }
 
+  public CreateDataSegments withCompactionState(CompactionState compactionState)
+  {
+    this.compactionState = compactionState;
+    return this;
+  }
+
+  public CreateDataSegments withVersion(String version)
+  {
+    this.version = version;
+    return this;
+  }
+
   public List<DataSegment> eachOfSizeInMb(long sizeMb)
+  {
+    return eachOfSize(sizeMb * 1_000_000);
+  }
+
+  public List<DataSegment> eachOfSize(long sizeInBytes)
   {
     boolean isEternityInterval = Objects.equals(granularity, Granularities.ALL);
     if (isEternityInterval) {
@@ -101,9 +126,11 @@ public class CreateDataSegments
             new NumberedDataSegment(
                 datasource,
                 nextInterval,
+                version,
                 new NumberedShardSpec(numPartition, numPartitions),
                 ++uniqueIdInInterval,
-                sizeMb
+                compactionState,
+                sizeInBytes
             )
         );
       }
@@ -118,34 +145,40 @@ public class CreateDataSegments
    */
   private static class NumberedDataSegment extends DataSegment
   {
+    private static final DateTimeFormatter FORMATTER = DateTimeFormat.forPattern("yyyyMMdd");
     private final int uniqueId;
 
     private NumberedDataSegment(
         String datasource,
         Interval interval,
+        String version,
         NumberedShardSpec shardSpec,
-        int uinqueId,
+        int uniqueId,
+        CompactionState compactionState,
         long size
     )
     {
       super(
           datasource,
           interval,
-          "1",
+          version,
           Collections.emptyMap(),
           Collections.emptyList(),
           Collections.emptyList(),
           shardSpec,
+          compactionState,
           IndexIO.CURRENT_VERSION_ID,
           size
       );
-      this.uniqueId = uinqueId;
+      this.uniqueId = uniqueId;
     }
 
     @Override
     public String toString()
     {
-      return "{" + getDataSource() + "::" + uniqueId + "}";
+      return "{" + getDataSource()
+             + "::" + getInterval().getStart().toString(FORMATTER)
+             + "::" + uniqueId + "}";
     }
   }
 }

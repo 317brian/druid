@@ -20,7 +20,7 @@ import path from 'path';
 import type * as playwright from 'playwright-chromium';
 
 import { DatasourcesOverview } from './component/datasources/overview';
-import { IngestionOverview } from './component/ingestion/overview';
+import { TasksOverview } from './component/ingestion/overview';
 import { ConfigureSchemaConfig } from './component/load-data/config/configure-schema';
 import {
   PartitionConfig,
@@ -60,7 +60,7 @@ describe('Reindexing from Druid', () => {
   });
 
   it('Reindex datasource from dynamic to range partitions', async () => {
-    const testName = 'reindex-dynamic-to-range-';
+    const testName = 'reindex-dynamic-to-range';
     const datasourceName = testName + new Date().toISOString();
     const interval = '2015-09-12/2015-09-13';
     const dataConnector = new ReindexDataConnector(page, {
@@ -155,10 +155,10 @@ function validateConnectLocalData(preview: string) {
 }
 
 async function validateTaskStatus(page: playwright.Page, datasourceName: string) {
-  const ingestionOverview = new IngestionOverview(page, UNIFIED_CONSOLE_URL);
+  const tasksOverview = new TasksOverview(page, UNIFIED_CONSOLE_URL);
 
   await retryIfJestAssertionError(async () => {
-    const tasks = await ingestionOverview.getTasks();
+    const tasks = await tasksOverview.getTasks();
     const task = tasks.find(t => t.datasource === datasourceName);
     expect(task).toBeDefined();
     expect(task!.status).toMatch('SUCCESS');

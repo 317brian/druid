@@ -33,6 +33,7 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.internal.matchers.ThrowableCauseMatcher;
 import org.junit.internal.matchers.ThrowableMessageMatcher;
 
 import java.util.ArrayList;
@@ -207,11 +208,64 @@ public class FutureUtilsTest
   }
 
   @Test
+  public void test_transform_error()
+  {
+    final ListenableFuture<String> future = FutureUtils.transform(
+        Futures.immediateFuture("x"),
+        s -> {
+          throw new ISE("oops");
+        }
+    );
+
+    Assert.assertTrue(future.isDone());
+    final ExecutionException e = Assert.assertThrows(
+        ExecutionException.class,
+        future::get
+    );
+
+    MatcherAssert.assertThat(
+        e,
+        ThrowableCauseMatcher.hasCause(CoreMatchers.instanceOf(IllegalStateException.class))
+    );
+
+    MatcherAssert.assertThat(
+        e,
+        ThrowableCauseMatcher.hasCause(ThrowableMessageMatcher.hasMessage(CoreMatchers.startsWith("oops")))
+    );
+  }
+
+  @Test
   public void test_transformAsync() throws Exception
   {
     Assert.assertEquals(
         "xy",
         FutureUtils.transformAsync(Futures.immediateFuture("x"), s -> Futures.immediateFuture(s + "y")).get()
+    );
+  }
+
+  @Test
+  public void test_transformAsync_exceptionInFunction()
+  {
+    final ListenableFuture<Object> f = FutureUtils.transformAsync(
+        Futures.immediateFuture("x"),
+        s -> {
+          throw new ISE("error!");
+        }
+    );
+
+    final ExecutionException e = Assert.assertThrows(
+        ExecutionException.class,
+        f::get
+    );
+
+    MatcherAssert.assertThat(
+        e,
+        ThrowableCauseMatcher.hasCause(CoreMatchers.instanceOf(ISE.class))
+    );
+
+    MatcherAssert.assertThat(
+        e,
+        ThrowableCauseMatcher.hasCause(ThrowableMessageMatcher.hasMessage(CoreMatchers.containsString("error!")))
     );
   }
 

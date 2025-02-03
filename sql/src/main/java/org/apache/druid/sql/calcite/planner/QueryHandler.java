@@ -47,6 +47,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.schema.ProjectableFilterableTable;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.sql.SqlExplain;
 import org.apache.calcite.sql.SqlNode;
@@ -54,23 +55,30 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.tools.ValidationException;
 import org.apache.calcite.util.Pair;
-import org.apache.druid.java.util.common.StringUtils;
+import org.apache.druid.error.DruidException;
+import org.apache.druid.error.InvalidSqlInput;
+import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.guava.BaseSequence;
 import org.apache.druid.java.util.common.guava.Sequences;
-import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.java.util.emitter.EmittingLogger;
 import org.apache.druid.query.Query;
+import org.apache.druid.query.QueryContexts;
+import org.apache.druid.query.explain.ExplainAttributes;
 import org.apache.druid.server.QueryResponse;
 import org.apache.druid.server.security.Action;
 import org.apache.druid.server.security.Resource;
 import org.apache.druid.server.security.ResourceAction;
+import org.apache.druid.sql.calcite.planner.querygen.DruidQueryGenerator;
 import org.apache.druid.sql.calcite.rel.DruidConvention;
 import org.apache.druid.sql.calcite.rel.DruidQuery;
 import org.apache.druid.sql.calcite.rel.DruidRel;
 import org.apache.druid.sql.calcite.rel.DruidUnionRel;
+import org.apache.druid.sql.calcite.rel.logical.DruidLogicalConvention;
+import org.apache.druid.sql.calcite.rel.logical.DruidLogicalNode;
 import org.apache.druid.sql.calcite.run.EngineFeature;
 import org.apache.druid.sql.calcite.run.QueryMaker;
 import org.apache.druid.sql.calcite.table.DruidTable;
+import org.apache.druid.sql.hook.DruidHook;
 import org.apache.druid.utils.Throwables;
 
 import javax.annotation.Nullable;
@@ -90,26 +98,28 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
 {
   static final EmittingLogger log = new EmittingLogger(QueryHandler.class);
 
-  protected SqlNode queryNode;
   protected SqlExplain explain;
-  protected SqlNode validatedQueryNode;
   private boolean isPrepared;
   protected RelRoot rootQueryRel;
   private PrepareResult prepareResult;
   protected RexBuilder rexBuilder;
 
-  public QueryHandler(SqlStatementHandler.HandlerContext handlerContext, SqlNode sqlNode, SqlExplain explain)
+  public QueryHandler(HandlerContext handlerContext, SqlExplain explain)
   {
     super(handlerContext);
-    this.queryNode = sqlNode;
     this.explain = explain;
   }
 
-  @Override
-  public void validate() throws ValidationException
+  protected SqlNode validate(SqlNode root)
   {
     CalcitePlanner planner = handlerContext.planner();
-    validatedQueryNode = planner.validate(rewriteParameters());
+    SqlNode validatedQueryNode;
+    try {
+      validatedQueryNode = planner.validate(root);
+    }
+    catch (ValidationException e) {
+      throw DruidPlanner.translateException(e);
+    }
 
     final SqlValidator validator = planner.getValidator();
     SqlResourceCollectorShuttle resourceCollectorShuttle = new SqlResourceCollectorShuttle(
@@ -118,24 +128,7 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
     );
     validatedQueryNode.accept(resourceCollectorShuttle);
     resourceActions = resourceCollectorShuttle.getResourceActions();
-  }
-
-  private SqlNode rewriteParameters()
-  {
-    // Uses {@link SqlParameterizerShuttle} to rewrite {@link SqlNode} to swap out any
-    // {@link org.apache.calcite.sql.SqlDynamicParam} early for their {@link SqlLiteral}
-    // replacement.
-    //
-    // Parameter replacement is done only if the client provides parameter values.
-    // If this is a PREPARE-only, then there will be no values even if the statement contains
-    // parameters. If this is a PLAN, then we'll catch later the case that the statement
-    // contains parameters, but no values were provided.
-    PlannerContext plannerContext = handlerContext.plannerContext();
-    if (plannerContext.getParameters().isEmpty()) {
-      return queryNode;
-    } else {
-      return queryNode.accept(new SqlParameterizerShuttle(plannerContext));
-    }
+    return validatedQueryNode;
   }
 
   @Override
@@ -145,7 +138,9 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
       return;
     }
     isPrepared = true;
+    SqlNode validatedQueryNode = validatedQueryNode();
     rootQueryRel = handlerContext.planner().rel(validatedQueryNode);
+    handlerContext.plannerContext().dispatchHook(DruidHook.CONVERTED_PLAN, rootQueryRel.rel);
     handlerContext.hook().captureQueryRel(rootQueryRel);
     final RelDataTypeFactory typeFactory = rootQueryRel.rel.getCluster().getTypeFactory();
     final SqlValidator validator = handlerContext.planner().getValidator();
@@ -154,6 +149,7 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
     final RelDataType returnedRowType;
 
     if (explain != null) {
+      handlerContext.plannerContext().setExplainAttributes(explainAttributes());
       returnedRowType = getExplainStructType(typeFactory);
     } else {
       returnedRowType = returnedRowType();
@@ -167,6 +163,8 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
   {
     return prepareResult;
   }
+
+  protected abstract SqlNode validatedQueryNode();
 
   protected abstract RelDataType returnedRowType();
 
@@ -183,7 +181,7 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
   }
 
   @Override
-  public PlannerResult plan() throws ValidationException
+  public PlannerResult plan()
   {
     prepare();
     final Set<RelOptTable> bindableTables = getBindableTables(rootQueryRel.rel);
@@ -196,15 +194,12 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
         // Consider BINDABLE convention when necessary. Used for metadata tables.
 
         if (!handlerContext.plannerContext().featureAvailable(EngineFeature.ALLOW_BINDABLE_PLAN)) {
-          throw new ValidationException(
-              StringUtils.format(
-                  "Cannot query table%s %s with SQL engine '%s'.",
-                  bindableTables.size() != 1 ? "s" : "",
-                  bindableTables.stream()
-                                .map(table -> Joiner.on(".").join(table.getQualifiedName()))
-                                .collect(Collectors.joining(", ")),
-                  handlerContext.engine().name()
-              )
+          throw InvalidSqlInput.exception(
+              "Cannot query table(s) [%s] with SQL engine [%s]",
+              bindableTables.stream()
+                            .map(table -> Joiner.on(".").join(table.getQualifiedName()))
+                            .collect(Collectors.joining(", ")),
+              handlerContext.engine().name()
           );
         }
 
@@ -214,20 +209,41 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
         return planForDruid();
       }
     }
-    catch (Exception e) {
-      Throwable cannotPlanException = Throwables.getCauseOfType(e, RelOptPlanner.CannotPlanException.class);
-      if (null == cannotPlanException) {
-        // Not a CannotPlanException, rethrow without logging.
+    catch (RelOptPlanner.CannotPlanException e) {
+      throw buildSQLPlanningError(e);
+    }
+    catch (RuntimeException e) {
+      if (e instanceof DruidException) {
         throw e;
       }
 
-      Logger logger = log;
-      if (!handlerContext.queryContext().isDebug()) {
-        logger = log.noStackTrace();
+      // Calcite throws a Runtime exception as the result of an IllegalTargetException
+      // as the result of invoking a method dynamically, when that method throws an
+      // exception. Unwrap the exception if this exception is from Calcite.
+      RelOptPlanner.CannotPlanException cpe = Throwables.getCauseOfType(e, RelOptPlanner.CannotPlanException.class);
+      if (cpe != null) {
+        throw buildSQLPlanningError(cpe);
       }
-      String errorMessage = buildSQLPlanningErrorMessage(cannotPlanException);
-      logger.warn(e, errorMessage);
-      throw new UnsupportedSQLQueryException(errorMessage);
+      DruidException de = Throwables.getCauseOfType(e, DruidException.class);
+      if (de != null) {
+        throw de;
+      }
+
+      // Exceptions during rule evaluations could be wrapped inside a RuntimeException by VolcanoRuleCall class.
+      // This block will extract a user-friendly message from the exception chain.
+      if (e.getMessage() != null
+          && e.getCause() != null
+          && e.getCause().getMessage() != null
+          && e.getMessage().startsWith("Error while applying rule")) {
+        throw DruidException.forPersona(DruidException.Persona.ADMIN)
+                            .ofCategory(DruidException.Category.UNCATEGORIZED)
+                            .build(e, "%s", e.getCause().getMessage());
+      }
+      throw DruidPlanner.translateException(e);
+    }
+    catch (Exception e) {
+      // Not sure what this is. Should it have been translated sooner?
+      throw DruidPlanner.translateException(e);
     }
   }
 
@@ -236,6 +252,9 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
   {
     return new ExplainAttributes(
         "SELECT",
+        null,
+        null,
+        null,
         null
     );
   }
@@ -251,7 +270,8 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
       {
         if (node instanceof TableScan) {
           RelOptTable table = node.getTable();
-          if (table.unwrap(ScannableTable.class) != null && table.unwrap(DruidTable.class) == null) {
+          if ((table.unwrap(ScannableTable.class) != null || table.unwrap(ProjectableFilterableTable.class) != null)
+              && table.unwrap(DruidTable.class) == null) {
             found.add(table);
             return;
           }
@@ -271,10 +291,10 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
    * things that are not directly translatable to native Druid queries such
    * as system tables and just a general purpose (but definitely not optimized)
    * fall-back.
-   *
+   * <p>
    * See {@link #planWithDruidConvention} which will handle things which are
    * directly translatable to native Druid queries.
-   *
+   * <p>
    * The bindable path handles parameter substitution of any values not
    * bound by the earlier steps.
    */
@@ -310,43 +330,43 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
     } else {
       final BindableRel theRel = bindableRel;
       final DataContext dataContext = plannerContext.createDataContext(
-              planner.getTypeFactory(),
-              plannerContext.getParameters()
+          planner.getTypeFactory(),
+          plannerContext.getParameters()
       );
       final Supplier<QueryResponse<Object[]>> resultsSupplier = () -> {
         final Enumerable<?> enumerable = theRel.bind(dataContext);
         final Enumerator<?> enumerator = enumerable.enumerator();
         return QueryResponse.withEmptyContext(
             Sequences.withBaggage(new BaseSequence<>(
-              new BaseSequence.IteratorMaker<Object[], QueryHandler.EnumeratorIterator<Object[]>>()
-              {
-                @Override
-                public QueryHandler.EnumeratorIterator<Object[]> make()
+                new BaseSequence.IteratorMaker<Object[], QueryHandler.EnumeratorIterator<Object[]>>()
                 {
-                  return new QueryHandler.EnumeratorIterator<>(new Iterator<Object[]>()
+                  @Override
+                  public QueryHandler.EnumeratorIterator<Object[]> make()
                   {
-                    @Override
-                    public boolean hasNext()
+                    return new QueryHandler.EnumeratorIterator<>(new Iterator<>()
                     {
-                      return enumerator.moveNext();
-                    }
+                      @Override
+                      public boolean hasNext()
+                      {
+                        return enumerator.moveNext();
+                      }
 
-                    @Override
-                    public Object[] next()
-                    {
-                      return (Object[]) enumerator.current();
-                    }
-                  });
+                      @Override
+                      public Object[] next()
+                      {
+                        return (Object[]) enumerator.current();
+                      }
+                    });
+                  }
+
+                  @Override
+                  public void cleanup(QueryHandler.EnumeratorIterator<Object[]> iterFromMake)
+                  {
+
+                  }
                 }
-
-                @Override
-                public void cleanup(QueryHandler.EnumeratorIterator<Object[]> iterFromMake)
-                {
-
-                }
-              }
-          ), enumerator::close)
-      );
+            ), enumerator::close)
+        );
       };
       return new PlannerResult(resultsSupplier, rootQueryRel.validatedRowType);
     }
@@ -370,7 +390,7 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
         if (plannerContext.getPlannerConfig().isUseNativeQueryExplain()) {
           DruidRel<?> druidRel = (DruidRel<?>) rel;
           try {
-            explanation = explainSqlPlanAsNativeQueries(relRoot, druidRel);
+            explanation = explainSqlPlanAsNativeQueries(plannerContext, relRoot, druidRel);
           }
           catch (Exception ex) {
             log.warn(ex, "Unable to translate to a native Druid query. Resorting to legacy Druid explain plan.");
@@ -417,7 +437,7 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
    * @return A string representing an array of native queries that correspond to the given SQL query, in JSON format
    * @throws JsonProcessingException
    */
-  private String explainSqlPlanAsNativeQueries(final RelRoot relRoot, DruidRel<?> rel) throws JsonProcessingException
+  private String explainSqlPlanAsNativeQueries(PlannerContext plannerContext, final RelRoot relRoot, DruidRel<?> rel) throws JsonProcessingException
   {
     ObjectMapper jsonMapper = handlerContext.jsonMapper();
     List<DruidQuery> druidQueryList;
@@ -434,6 +454,9 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
 
     for (DruidQuery druidQuery : druidQueryList) {
       Query<?> nativeQuery = druidQuery.getQuery();
+
+      plannerContext.dispatchHook(DruidHook.NATIVE_PLAN, nativeQuery);
+
       ObjectNode objectNode = jsonMapper.createObjectNode();
       objectNode.set("query", jsonMapper.convertValue(nativeQuery, ObjectNode.class));
       objectNode.set("signature", jsonMapper.convertValue(druidQuery.getOutputRowSignature(), ArrayNode.class));
@@ -516,42 +539,83 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
     );
     QueryValidations.validateLogicalQueryForDruid(handlerContext.plannerContext(), parameterized);
     CalcitePlanner planner = handlerContext.planner();
-    final DruidRel<?> druidRel = (DruidRel<?>) planner.transform(
-        CalciteRulesManager.DRUID_CONVENTION_RULES,
-        planner.getEmptyTraitSet()
-               .replace(DruidConvention.instance())
-               .plus(rootQueryRel.collation),
-        parameterized
-    );
-    handlerContext.hook().captureDruidRel(druidRel);
 
-    if (explain != null) {
-      return planExplanation(possiblyLimitedRoot, druidRel, true);
-    } else {
-      // Compute row type.
-      final RelDataType rowType = prepareResult.getReturnedRowType();
+    if (plannerContext.getPlannerConfig()
+                      .getNativeQuerySqlPlanningMode()
+                      .equals(QueryContexts.NATIVE_QUERY_SQL_PLANNING_MODE_DECOUPLED)
+    ) {
+      RelNode newRoot = parameterized;
+      newRoot = planner.transform(
+          CalciteRulesManager.DRUID_DAG_CONVENTION_RULES,
+          planner.getEmptyTraitSet()
+                 .plus(rootQueryRel.collation)
+                 .plus(DruidLogicalConvention.instance()),
+          newRoot
+      );
 
-      // Start the query.
-      final Supplier<QueryResponse<Object[]>> resultsSupplier = () -> {
-        // sanity check
-        final Set<ResourceAction> readResourceActions =
-            plannerContext.getResourceActions()
-                          .stream()
-                          .filter(action -> action.getAction() == Action.READ)
-                          .collect(Collectors.toSet());
-        Preconditions.checkState(
-            readResourceActions.isEmpty() == druidRel.getDataSourceNames().isEmpty()
-            // The resources found in the plannerContext can be less than the datasources in
-            // the query plan, because the query planner can eliminate empty tables by replacing
-            // them with InlineDataSource of empty rows.
-            || readResourceActions.size() >= druidRel.getDataSourceNames().size(),
-            "Authorization sanity check failed"
+      plannerContext.dispatchHook(DruidHook.DRUID_PLAN, newRoot);
+
+      DruidQueryGenerator generator = new DruidQueryGenerator(plannerContext, (DruidLogicalNode) newRoot, rexBuilder);
+      DruidQuery baseQuery = generator.buildQuery();
+      try {
+        log.info(
+            "final query : " +
+                new DefaultObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(baseQuery.getQuery())
         );
+      }
+      catch (JsonProcessingException e) {
+        throw new RuntimeException(e);
+      }
+      DruidQuery finalBaseQuery = baseQuery;
+      final Supplier<QueryResponse<Object[]>> resultsSupplier = () -> plannerContext.getQueryMaker().runQuery(finalBaseQuery);
 
-        return druidRel.runQuery();
-      };
+      if (explain != null) {
+        plannerContext.dispatchHook(DruidHook.NATIVE_PLAN, finalBaseQuery.getQuery());
+        return planExplanation(possiblyLimitedRoot, newRoot, true);
+      }
 
-      return new PlannerResult(resultsSupplier, rowType);
+      return new PlannerResult(resultsSupplier, finalBaseQuery.getOutputRowType());
+    } else {
+      final DruidRel<?> druidRel = (DruidRel<?>) planner.transform(
+          CalciteRulesManager.DRUID_CONVENTION_RULES,
+          planner.getEmptyTraitSet()
+                 .replace(DruidConvention.instance())
+                 .plus(rootQueryRel.collation),
+          parameterized
+      );
+
+      handlerContext.hook().captureDruidRel(druidRel);
+
+      plannerContext.dispatchHook(DruidHook.DRUID_PLAN, druidRel);
+
+      if (explain != null) {
+        return planExplanation(possiblyLimitedRoot, druidRel, true);
+      } else {
+        // Compute row type.
+        final RelDataType rowType = prepareResult.getReturnedRowType();
+
+        // Start the query.
+        final Supplier<QueryResponse<Object[]>> resultsSupplier = () -> {
+          // sanity check
+          final Set<ResourceAction> readResourceActions =
+              plannerContext.getResourceActions()
+                            .stream()
+                            .filter(action -> action.getAction() == Action.READ)
+                            .collect(Collectors.toSet());
+          Preconditions.checkState(
+              readResourceActions.isEmpty() == druidRel.getDataSourceNames().isEmpty()
+              // The resources found in the plannerContext can be less than the datasources in
+              // the query plan, because the query planner can eliminate empty tables by replacing
+              // them with InlineDataSource of empty rows.
+              || readResourceActions.size() >= druidRel.getDataSourceNames().size(),
+              "Authorization sanity check failed"
+          );
+
+          return druidRel.runQuery();
+        };
+
+        return new PlannerResult(resultsSupplier, rowType);
+      }
     }
   }
 
@@ -559,12 +623,11 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
    * This method wraps the root with a {@link LogicalSort} that applies a limit (no ordering change). If the outer rel
    * is already a {@link Sort}, we can merge our outerLimit into it, similar to what is going on in
    * {@link org.apache.druid.sql.calcite.rule.SortCollapseRule}.
-   *
+   * <p>
    * The {@link PlannerContext#CTX_SQL_OUTER_LIMIT} flag that controls this wrapping is meant for internal use only by
    * the web console, allowing it to apply a limit to queries without rewriting the original SQL.
    *
    * @param root root node
-   *
    * @return root node wrapped with a limiting logical sort if a limit is specified in the query context.
    */
   @Nullable
@@ -603,50 +666,61 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
       );
     }
 
-    return new RelRoot(newRootRel, root.validatedRowType, root.kind, root.fields, root.collation);
+    return new RelRoot(newRootRel, root.validatedRowType, root.kind, root.fields, root.collation, root.hints);
   }
 
   protected abstract QueryMaker buildQueryMaker(RelRoot rootQueryRel) throws ValidationException;
 
-  private String buildSQLPlanningErrorMessage(Throwable exception)
+  private DruidException buildSQLPlanningError(RelOptPlanner.CannotPlanException exception)
   {
     String errorMessage = handlerContext.plannerContext().getPlanningError();
-    if (null == errorMessage && exception instanceof UnsupportedSQLQueryException) {
-      errorMessage = exception.getMessage();
-    }
-    if (null == errorMessage) {
-      errorMessage = "Please check Broker logs for additional details.";
+    if (errorMessage == null) {
+      throw DruidException.forPersona(DruidException.Persona.OPERATOR)
+                          .ofCategory(DruidException.Category.UNSUPPORTED)
+                          .build(exception, "Unhandled Query Planning Failure, see broker logs for details");
     } else {
       // Planning errors are more like hints: it isn't guaranteed that the planning error is actually what went wrong.
-      errorMessage = "Possible error: " + errorMessage;
+      // Even though the errors could be targetted to a more expert persona the errors aren't leaking any privileged
+      // information about the cluster that an admin might care about. The errors that are user resolvable are worth
+      // the potential confusion that a user might face with one that requires an expert persona.
+      throw DruidException.forPersona(DruidException.Persona.USER)
+                          .ofCategory(DruidException.Category.INVALID_INPUT)
+                          .build(
+                              exception,
+                              "Query could not be planned. A possible reason is [%s]",
+                              errorMessage
+                          );
     }
-    // Finally, add the query itself to error message that user will get.
-    return StringUtils.format(
-        "Query not supported. %s SQL was: %s", errorMessage,
-        handlerContext.plannerContext().getSql()
-    );
   }
 
   public static class SelectHandler extends QueryHandler
   {
+    private final SqlNode queryNode;
+    private SqlNode validatedQueryNode;
+
     public SelectHandler(
         HandlerContext handlerContext,
         SqlNode sqlNode,
-        SqlExplain explain)
+        SqlExplain explain
+    )
     {
-      super(handlerContext, sqlNode, explain);
+      super(handlerContext, explain);
+      this.queryNode = sqlNode;
     }
 
     @Override
-    public void validate() throws ValidationException
+    public void validate()
     {
       if (!handlerContext.plannerContext().featureAvailable(EngineFeature.CAN_SELECT)) {
-        throw new ValidationException(StringUtils.format(
-            "Cannot execute SELECT with SQL engine '%s'.",
-            handlerContext.engine().name())
-        );
+        throw InvalidSqlInput.exception("Cannot execute SELECT with SQL engine [%s]", handlerContext.engine().name());
       }
-      super.validate();
+      validatedQueryNode = validate(queryNode);
+    }
+
+    @Override
+    protected SqlNode validatedQueryNode()
+    {
+      return validatedQueryNode;
     }
 
     @Override
@@ -655,7 +729,8 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
       final RelDataTypeFactory typeFactory = rootQueryRel.rel.getCluster().getTypeFactory();
       return handlerContext.engine().resultTypeForSelect(
           typeFactory,
-          rootQueryRel.validatedRowType
+          rootQueryRel.validatedRowType,
+          handlerContext.plannerContext().queryContextMap()
       );
     }
 
@@ -670,7 +745,8 @@ public abstract class QueryHandler extends SqlStatementHandler.BaseStatementHand
     {
       return handlerContext.engine().buildQueryMakerForSelect(
           rootQueryRel,
-          handlerContext.plannerContext());
+          handlerContext.plannerContext()
+      );
     }
   }
 

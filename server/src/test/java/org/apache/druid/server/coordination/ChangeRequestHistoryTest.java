@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -135,7 +136,7 @@ public class ChangeRequestHistoryTest
     final AtomicBoolean callbackExcecuted = new AtomicBoolean(false);
     Futures.addCallback(
         future,
-        new FutureCallback<ChangeRequestsSnapshot<DataSegmentChangeRequest>>()
+        new FutureCallback<>()
         {
           @Override
           public void onSuccess(ChangeRequestsSnapshot result)
@@ -148,7 +149,8 @@ public class ChangeRequestHistoryTest
           {
             callbackExcecuted.set(true);
           }
-        }
+        },
+        MoreExecutors.directExecutor()
     );
 
     future.cancel(true);
@@ -192,7 +194,7 @@ public class ChangeRequestHistoryTest
     final AtomicBoolean callbackExcecuted = new AtomicBoolean(false);
     Futures.addCallback(
         future,
-        new FutureCallback<ChangeRequestsSnapshot<DataSegmentChangeRequest>>()
+        new FutureCallback<>()
         {
           @Override
           public void onSuccess(ChangeRequestsSnapshot result)
@@ -205,7 +207,8 @@ public class ChangeRequestHistoryTest
           {
             callbackExcecuted.set(true);
           }
-        }
+        },
+        MoreExecutors.directExecutor()
     );
 
     history.stop();

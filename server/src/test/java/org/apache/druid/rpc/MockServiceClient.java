@@ -41,6 +41,7 @@ import java.util.Queue;
 public class MockServiceClient implements ServiceClient
 {
   private final Queue<Expectation> expectations = new ArrayDeque<>(16);
+  private int requestNumber = -1;
 
   @Override
   public <IntermediateType, FinalType> ListenableFuture<FinalType> asyncRequest(
@@ -50,8 +51,9 @@ public class MockServiceClient implements ServiceClient
   {
     final Expectation expectation = expectations.poll();
 
+    requestNumber++;
     Assert.assertEquals(
-        "request",
+        "request[" + requestNumber + "]",
         expectation == null ? null : expectation.request,
         requestBuilder
     );
@@ -71,13 +73,13 @@ public class MockServiceClient implements ServiceClient
     return this;
   }
 
-  public MockServiceClient expect(final RequestBuilder request, final HttpResponse response)
+  public MockServiceClient expectAndRespond(final RequestBuilder request, final HttpResponse response)
   {
     expectations.add(new Expectation(request, Either.value(response)));
     return this;
   }
 
-  public MockServiceClient expect(
+  public MockServiceClient expectAndRespond(
       final RequestBuilder request,
       final HttpResponseStatus status,
       final Map<String, String> headers,
@@ -91,10 +93,10 @@ public class MockServiceClient implements ServiceClient
     if (content != null) {
       response.setContent(ChannelBuffers.wrappedBuffer(content));
     }
-    return expect(request, response);
+    return expectAndRespond(request, response);
   }
 
-  public MockServiceClient expect(final RequestBuilder request, final Throwable e)
+  public MockServiceClient expectAndThrow(final RequestBuilder request, final Throwable e)
   {
     expectations.add(new Expectation(request, Either.error(e)));
     return this;

@@ -112,12 +112,12 @@ public class SqlExecutionReporter
       }
       metricBuilder.setDimension("remoteAddress", StringUtils.nullToEmptyNonDruidDataString(remoteAddress));
       metricBuilder.setDimension("success", String.valueOf(success));
-      emitter.emit(metricBuilder.build("sqlQuery/time", TimeUnit.NANOSECONDS.toMillis(queryTimeNs)));
+      emitter.emit(metricBuilder.setMetric("sqlQuery/time", TimeUnit.NANOSECONDS.toMillis(queryTimeNs)));
       if (bytesWritten >= 0) {
-        emitter.emit(metricBuilder.build("sqlQuery/bytes", bytesWritten));
+        emitter.emit(metricBuilder.setMetric("sqlQuery/bytes", bytesWritten));
       }
       if (planningTimeNanos >= 0) {
-        emitter.emit(metricBuilder.build(
+        emitter.emit(metricBuilder.setMetric(
             "sqlQuery/planningTimeMs",
             TimeUnit.NANOSECONDS.toMillis(planningTimeNanos)
         ));
@@ -133,7 +133,6 @@ public class SqlExecutionReporter
         statsMap.put("identity", plannerContext.getAuthenticationResult().getIdentity());
         queryContext.put("nativeQueryIds", plannerContext.getNativeQueryIds().toString());
       }
-      statsMap.put("context", queryContext);
       if (e != null) {
         statsMap.put("exception", e.toString());
 

@@ -19,7 +19,6 @@
 
 package org.apache.druid.metadata;
 
-
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Suppliers;
@@ -34,7 +33,8 @@ import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.IAE;
 import org.apache.druid.java.util.common.Intervals;
 import org.apache.druid.java.util.common.StringUtils;
-import org.apache.druid.segment.TestHelper;
+import org.apache.druid.segment.TestDataSource;
+import org.apache.druid.server.audit.AuditSerdeHelper;
 import org.apache.druid.server.audit.SQLAuditManager;
 import org.apache.druid.server.audit.SQLAuditManagerConfig;
 import org.apache.druid.server.coordinator.rules.IntervalLoadRule;
@@ -53,8 +53,6 @@ import java.util.Map;
 
 public class SQLMetadataRuleManagerTest
 {
-  private static final String DATASOURCE = "wiki";
-  
   @org.junit.Rule
   public final TestDerbyConnector.DerbyConnectorRule derbyConnectorRule = new TestDerbyConnector.DerbyConnectorRule();
 
@@ -63,9 +61,7 @@ public class SQLMetadataRuleManagerTest
   private MetadataRuleManagerConfig managerConfig;
   private SQLMetadataRuleManager ruleManager;
   private AuditManager auditManager;
-  private SQLMetadataSegmentPublisher publisher;
   private final ObjectMapper mapper = new DefaultObjectMapper();
-  private final ObjectMapper jsonMapper = TestHelper.makeJsonMapper();
 
   @Before
   public void setUp()
@@ -73,23 +69,22 @@ public class SQLMetadataRuleManagerTest
     connector = derbyConnectorRule.getConnector();
     tablesConfig = derbyConnectorRule.metadataTablesConfigSupplier().get();
     connector.createAuditTable();
+
+    final SQLAuditManagerConfig auditManagerConfig = new SQLAuditManagerConfig(null, null, null, null, null);
     auditManager = new SQLAuditManager(
+        auditManagerConfig,
+        new AuditSerdeHelper(auditManagerConfig, null, mapper, mapper),
         connector,
         Suppliers.ofInstance(tablesConfig),
         new NoopServiceEmitter(),
-        mapper,
-        new SQLAuditManagerConfig()
+        mapper
     );
 
     connector.createRulesTable();
     managerConfig = new MetadataRuleManagerConfig();
     ruleManager = new SQLMetadataRuleManager(mapper, managerConfig, tablesConfig, connector, auditManager);
+    connector.createSegmentSchemasTable();
     connector.createSegmentTable();
-    publisher = new SQLMetadataSegmentPublisher(
-        jsonMapper,
-        derbyConnectorRule.metadataTablesConfigSupplier().get(),
-        connector
-    );
   }
 
   @Test
@@ -108,15 +103,16 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = Collections.singletonList(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"),
-            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS)
+            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS),
+            null
         )
     );
-    ruleManager.overrideRule(DATASOURCE, rules, createAuditInfo("override rule"));
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, createAuditInfo("override rule"));
     // New rule should be be reflected in the in memory rules map immediately after being set by user
     Map<String, List<Rule>> allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
-    Assert.assertEquals(rules.get(0), allRules.get(DATASOURCE).get(0));
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
+    Assert.assertEquals(rules.get(0), allRules.get(TestDataSource.WIKI).get(0));
   }
 
   @Test
@@ -125,7 +121,7 @@ public class SQLMetadataRuleManagerTest
     // Datasource level rules cannot be null
     IAE exception = Assert.assertThrows(
         IAE.class,
-        () -> ruleManager.overrideRule(DATASOURCE, null, createAuditInfo("null rule"))
+        () -> ruleManager.overrideRule(TestDataSource.WIKI, null, createAuditInfo("null rule"))
     );
     Assert.assertEquals("Rules cannot be null.", exception.getMessage());
 
@@ -158,7 +154,7 @@ public class SQLMetadataRuleManagerTest
     // Datasource level rules can be empty
     Assert.assertTrue(
         ruleManager.overrideRule(
-            DATASOURCE,
+            TestDataSource.WIKI,
             Collections.emptyList(),
             createAuditInfo("empty rule")
         )
@@ -171,27 +167,28 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = Collections.singletonList(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"),
-            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS)
+            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS),
+            null
         )
     );
     final AuditInfo auditInfo = createAuditInfo("create audit entry");
-    ruleManager.overrideRule(DATASOURCE, rules, auditInfo);
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, auditInfo);
     // fetch rules from metadata storage
     ruleManager.poll();
 
-    Assert.assertEquals(rules, ruleManager.getRules(DATASOURCE));
+    Assert.assertEquals(rules, ruleManager.getRules(TestDataSource.WIKI));
 
     // verify audit entry is created
-    List<AuditEntry> auditEntries = auditManager.fetchAuditHistory(DATASOURCE, "rules", null);
+    List<AuditEntry> auditEntries = auditManager.fetchAuditHistory(TestDataSource.WIKI, "rules", null);
     Assert.assertEquals(1, auditEntries.size());
     AuditEntry entry = auditEntries.get(0);
 
     Assert.assertEquals(
         rules,
-        mapper.readValue(entry.getPayload(), new TypeReference<List<Rule>>() {})
+        mapper.readValue(entry.getPayload().serialized(), new TypeReference<List<Rule>>() {})
     );
     Assert.assertEquals(auditInfo, entry.getAuditInfo());
-    Assert.assertEquals(DATASOURCE, entry.getKey());
+    Assert.assertEquals(TestDataSource.WIKI, entry.getKey());
   }
 
   @Test
@@ -200,18 +197,19 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = Collections.singletonList(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"), ImmutableMap.of(
-            DruidServer.DEFAULT_TIER,
-            DruidServer.DEFAULT_NUM_REPLICANTS
-        )
+                DruidServer.DEFAULT_TIER,
+                DruidServer.DEFAULT_NUM_REPLICANTS
+        ),
+            null
         )
     );
     final AuditInfo auditInfo = createAuditInfo("test_comment");
-    ruleManager.overrideRule(DATASOURCE, rules, auditInfo);
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, auditInfo);
     ruleManager.overrideRule("test_dataSource2", rules, auditInfo);
     // fetch rules from metadata storage
     ruleManager.poll();
 
-    Assert.assertEquals(rules, ruleManager.getRules(DATASOURCE));
+    Assert.assertEquals(rules, ruleManager.getRules(TestDataSource.WIKI));
     Assert.assertEquals(rules, ruleManager.getRules("test_dataSource2"));
 
     // test fetch audit entries
@@ -220,7 +218,7 @@ public class SQLMetadataRuleManagerTest
     for (AuditEntry entry : auditEntries) {
       Assert.assertEquals(
           rules,
-          mapper.readValue(entry.getPayload(), new TypeReference<List<Rule>>() {})
+          mapper.readValue(entry.getPayload().serialized(), new TypeReference<List<Rule>>() {})
       );
       Assert.assertEquals(auditInfo, entry.getAuditInfo());
     }
@@ -232,16 +230,17 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = ImmutableList.of(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"),
-            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS)
+            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS),
+            null
         )
     );
-    ruleManager.overrideRule(DATASOURCE, rules, createAuditInfo("test"));
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, createAuditInfo("test"));
 
     // Verify that the rule was added
     ruleManager.poll();
     Map<String, List<Rule>> allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
 
     // Now delete rules
     ruleManager.removeRulesForEmptyDatasourcesOlderThan(System.currentTimeMillis());
@@ -258,16 +257,17 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = ImmutableList.of(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"),
-            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS)
+            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS),
+            null
         )
     );
-    ruleManager.overrideRule(DATASOURCE, rules, createAuditInfo("update rules"));
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, createAuditInfo("update rules"));
 
     // Verify that rule was added
     ruleManager.poll();
     Map<String, List<Rule>> allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
 
     // This will not delete the rule as the rule was created just now so it will have the created timestamp later than
     // the timestamp 2012-01-01T00:00:00Z
@@ -277,7 +277,7 @@ public class SQLMetadataRuleManagerTest
     ruleManager.poll();
     allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
   }
 
   @Test
@@ -286,20 +286,21 @@ public class SQLMetadataRuleManagerTest
     List<Rule> rules = ImmutableList.of(
         new IntervalLoadRule(
             Intervals.of("2015-01-01/2015-02-01"),
-            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS)
+            ImmutableMap.of(DruidServer.DEFAULT_TIER, DruidServer.DEFAULT_NUM_REPLICANTS),
+            null
         )
     );
-    ruleManager.overrideRule(DATASOURCE, rules, createAuditInfo("update rules"));
+    ruleManager.overrideRule(TestDataSource.WIKI, rules, createAuditInfo("update rules"));
 
     // Verify that rule was added
     ruleManager.poll();
     Map<String, List<Rule>> allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
 
     // Add segment metadata to segment table so that the datasource is considered active
     DataSegment dataSegment = new DataSegment(
-        DATASOURCE,
+        TestDataSource.WIKI,
         Intervals.of("2015-01-01/2015-02-01"),
         "1",
         ImmutableMap.of(
@@ -313,7 +314,7 @@ public class SQLMetadataRuleManagerTest
         1,
         1234L
     );
-    publisher.publishSegment(dataSegment);
+    SqlSegmentsMetadataManagerTestBase.publishSegment(connector, tablesConfig, mapper, dataSegment);
 
     // This will not delete the rule as the datasource has segment in the segment metadata table
     ruleManager.removeRulesForEmptyDatasourcesOlderThan(System.currentTimeMillis());
@@ -322,7 +323,7 @@ public class SQLMetadataRuleManagerTest
     ruleManager.poll();
     allRules = ruleManager.getAllRules();
     Assert.assertEquals(1, allRules.size());
-    Assert.assertEquals(1, allRules.get(DATASOURCE).size());
+    Assert.assertEquals(1, allRules.get(TestDataSource.WIKI).size());
   }
 
   @Test
@@ -361,7 +362,7 @@ public class SQLMetadataRuleManagerTest
 
   private AuditInfo createAuditInfo(String comment)
   {
-    return new AuditInfo("test", comment, "127.0.0.1");
+    return new AuditInfo("test", "id", comment, "127.0.0.1");
   }
 
 }

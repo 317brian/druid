@@ -2,121 +2,145 @@
 
 exports[`MaxTasksButton matches snapshot 1`] = `
 <React.Fragment>
-  <Blueprint4.Popover2
+  <Blueprint5.Popover
     boundary="clippingParents"
     captureDismiss={false}
     className="max-tasks-button"
     content={
-      <Blueprint4.Menu>
-        <Blueprint4.MenuDivider
+      <Blueprint5.Menu>
+        <Blueprint5.MenuDivider
           title="Maximum number of tasks to launch"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="tick"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="6 (full cluster capacity)"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="blank"
           label="(1 controller + 1 worker)"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="2"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="blank"
           label="(1 controller + max 2 workers)"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="3"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="blank"
           label="(1 controller + max 3 workers)"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="4"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="blank"
           label="(1 controller + max 4 workers)"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="5"
         />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="blank"
           multiline={false}
           onClick={[Function]}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
           text="Custom"
         />
-        <Blueprint4.MenuDivider />
-        <Blueprint4.MenuItem
+        <Blueprint5.MenuDivider />
+        <Blueprint5.MenuItem
           active={false}
           disabled={false}
           icon="flow-branch"
-          label="max"
+          label="Max"
           multiline={false}
-          popoverProps={Object {}}
-          selected={false}
+          popoverProps={{}}
           shouldDismissPopover={true}
+          submenuProps={
+            {
+              "style": {
+                "width": 300,
+              },
+            }
+          }
           text="Task assignment"
         >
-          <Blueprint4.MenuItem
+          <Blueprint5.MenuItem
             active={false}
             disabled={false}
             icon="tick"
-            multiline={false}
+            multiline={true}
             onClick={[Function]}
-            popoverProps={Object {}}
-            selected={false}
-            shouldDismissPopover={false}
-            text="max - Use as many tasks as possible, up to the maximum."
+            popoverProps={{}}
+            shouldDismissPopover={true}
+            text={
+              <React.Fragment>
+                <strong>
+                  Max
+                </strong>
+                : uses the maximum possible tasks up to the specified limit.
+              </React.Fragment>
+            }
           />
-          <Blueprint4.MenuItem
+          <Blueprint5.MenuItem
             active={false}
             disabled={false}
             icon="blank"
-            multiline={false}
+            multiline={true}
             onClick={[Function]}
-            popoverProps={Object {}}
-            selected={false}
-            shouldDismissPopover={false}
-            text="auto - Use as few tasks as possible without exceeding 10 GiB or 10,000 files per task."
+            popoverProps={{}}
+            shouldDismissPopover={true}
+            text={
+              <React.Fragment>
+                <strong>
+                  Auto
+                </strong>
+                : uses the minimum number of tasks while
+                 
+                <span
+                  onClick={[Function]}
+                  style={
+                    {
+                      "color": "#3eadf9",
+                      "cursor": "pointer",
+                    }
+                  }
+                >
+                  staying within constraints.
+                </span>
+              </React.Fragment>
+            }
           />
-        </Blueprint4.MenuItem>
-      </Blueprint4.Menu>
+        </Blueprint5.MenuItem>
+      </Blueprint5.Menu>
     }
     defaultIsOpen={false}
     disabled={false}
@@ -136,10 +160,10 @@ exports[`MaxTasksButton matches snapshot 1`] = `
     transitionDuration={300}
     usePortal={true}
   >
-    <Blueprint4.Button
+    <Blueprint5.Button
       rightIcon="caret-down"
       text="Max tasks: 6 (full cluster capacity)"
     />
-  </Blueprint4.Popover2>
+  </Blueprint5.Popover>
 </React.Fragment>
 `;

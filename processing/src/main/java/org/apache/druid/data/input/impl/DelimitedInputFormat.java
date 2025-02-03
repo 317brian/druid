@@ -23,10 +23,10 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.data.input.InputEntity;
 import org.apache.druid.data.input.InputEntityReader;
 import org.apache.druid.data.input.InputRowSchema;
+import org.apache.druid.java.util.common.StringUtils;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -51,7 +51,8 @@ public class DelimitedInputFormat extends FlatTextInputFormat
       @JsonProperty("delimiter") @Nullable String delimiter,
       @Deprecated @JsonProperty("hasHeaderRow") @Nullable Boolean hasHeaderRow,
       @JsonProperty("findColumnsFromHeader") @Nullable Boolean findColumnsFromHeader,
-      @JsonProperty("skipHeaderRows") int skipHeaderRows
+      @JsonProperty("skipHeaderRows") int skipHeaderRows,
+      @JsonProperty("tryParseNumbers") @Nullable Boolean tryParseNumbers
   )
   {
     super(
@@ -60,7 +61,8 @@ public class DelimitedInputFormat extends FlatTextInputFormat
         delimiter == null ? DEFAULT_DELIMITER : delimiter,
         hasHeaderRow,
         findColumnsFromHeader,
-        skipHeaderRows
+        skipHeaderRows,
+        tryParseNumbers
     );
   }
 
@@ -80,8 +82,32 @@ public class DelimitedInputFormat extends FlatTextInputFormat
         getColumns(),
         isFindColumnsFromHeader(),
         getSkipHeaderRows(),
-        line -> splitToList(Splitter.on(getDelimiter()), line)
+        makeDelimitedValueParser(
+            getDelimiter(),
+            useListBasedInputRows() ? getColumns().size() : DelimitedBytes.UNKNOWN_FIELD_COUNT
+        ),
+        useListBasedInputRows(),
+        shouldTryParseNumbers()
     );
+  }
+
+  /**
+   * Create a parser for a particular delimiter and expected number of fields.
+   */
+  private static DelimitedValueReader.DelimitedValueParser makeDelimitedValueParser(
+      final String delimiter,
+      final int numFields
+  )
+  {
+    final byte[] utf8Delimiter = StringUtils.toUtf8(delimiter);
+    if (utf8Delimiter.length == 1) {
+      // Single-byte delimiter: split bytes directly, prior to UTF-8 conversion
+      final byte delimiterByte = utf8Delimiter[0];
+      return bytes -> DelimitedBytes.split(bytes, delimiterByte, numFields);
+    } else {
+      final Splitter splitter = Splitter.on(delimiter);
+      return bytes -> splitToList(splitter, StringUtils.fromUtf8(bytes));
+    }
   }
 
   /**
@@ -99,7 +125,7 @@ public class DelimitedInputFormat extends FlatTextInputFormat
 
     while (iterator.hasNext()) {
       String splitValue = iterator.next();
-      if (!NullHandling.replaceWithDefault() && splitValue.isEmpty()) {
+      if (splitValue.isEmpty()) {
         result.add(null);
       } else {
         result.add(splitValue);

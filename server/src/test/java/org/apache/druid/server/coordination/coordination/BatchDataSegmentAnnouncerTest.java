@@ -35,11 +35,14 @@ import org.apache.druid.curator.announcement.Announcer;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.concurrent.Execs;
 import org.apache.druid.segment.TestHelper;
+import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.realtime.appenderator.SegmentSchemas;
 import org.apache.druid.server.coordination.BatchDataSegmentAnnouncer;
 import org.apache.druid.server.coordination.ChangeRequestHistory;
 import org.apache.druid.server.coordination.ChangeRequestsSnapshot;
 import org.apache.druid.server.coordination.DataSegmentChangeRequest;
 import org.apache.druid.server.coordination.DruidServerMetadata;
+import org.apache.druid.server.coordination.SegmentSchemasChangeRequest;
 import org.apache.druid.server.coordination.ServerType;
 import org.apache.druid.server.initialization.BatchDataSegmentAnnouncerConfig;
 import org.apache.druid.server.initialization.ZkPathsConfig;
@@ -356,6 +359,98 @@ public class BatchDataSegmentAnnouncerTest
     }
   }
 
+  @Test
+  public void testSchemaAnnounce() throws Exception
+  {
+    String dataSource = "foo";
+    String segmentId = "id";
+    String taskId = "t1";
+    SegmentSchemas.SegmentSchema absoluteSchema1 =
+        new SegmentSchemas.SegmentSchema(
+            dataSource,
+            segmentId,
+            false,
+            20,
+            ImmutableList.of("dim1", "dim2"),
+            Collections.emptyList(),
+            ImmutableMap.of("dim1", ColumnType.STRING, "dim2", ColumnType.STRING)
+        );
+
+
+    SegmentSchemas.SegmentSchema absoluteSchema2 =
+        new SegmentSchemas.SegmentSchema(
+            dataSource,
+            segmentId,
+            false,
+            40,
+            ImmutableList.of("dim1", "dim2", "dim3"),
+            ImmutableList.of(),
+            ImmutableMap.of("dim1", ColumnType.UNKNOWN_COMPLEX, "dim2", ColumnType.STRING, "dim3", ColumnType.STRING)
+        );
+
+    SegmentSchemas.SegmentSchema deltaSchema =
+        new SegmentSchemas.SegmentSchema(
+            dataSource,
+            segmentId,
+            true,
+            40,
+            ImmutableList.of("dim3"),
+            ImmutableList.of("dim1"),
+            ImmutableMap.of("dim1", ColumnType.UNKNOWN_COMPLEX, "dim3", ColumnType.STRING)
+        );
+
+    segmentAnnouncer.announceSegmentSchemas(
+        taskId,
+        new SegmentSchemas(Collections.singletonList(absoluteSchema1)),
+        new SegmentSchemas(Collections.singletonList(absoluteSchema1)));
+
+    ChangeRequestsSnapshot<DataSegmentChangeRequest> snapshot;
+
+    snapshot = segmentAnnouncer.getSegmentChangesSince(
+        new ChangeRequestHistory.Counter(-1, -1)
+    ).get();
+    Assert.assertEquals(1, snapshot.getRequests().size());
+    Assert.assertEquals(1, snapshot.getCounter().getCounter());
+
+    Assert.assertEquals(
+        absoluteSchema1,
+        ((SegmentSchemasChangeRequest) snapshot.getRequests().get(0))
+            .getSegmentSchemas()
+            .getSegmentSchemaList()
+            .get(0)
+    );
+    segmentAnnouncer.announceSegmentSchemas(
+        taskId,
+        new SegmentSchemas(Collections.singletonList(absoluteSchema2)),
+        new SegmentSchemas(Collections.singletonList(deltaSchema))
+    );
+
+    snapshot = segmentAnnouncer.getSegmentChangesSince(snapshot.getCounter()).get();
+
+    Assert.assertEquals(
+        deltaSchema,
+        ((SegmentSchemasChangeRequest) snapshot.getRequests().get(0))
+            .getSegmentSchemas()
+            .getSegmentSchemaList()
+            .get(0)
+    );
+    Assert.assertEquals(1, snapshot.getRequests().size());
+    Assert.assertEquals(2, snapshot.getCounter().getCounter());
+
+    snapshot = segmentAnnouncer.getSegmentChangesSince(
+        new ChangeRequestHistory.Counter(-1, -1)
+    ).get();
+    Assert.assertEquals(
+        absoluteSchema2,
+        ((SegmentSchemasChangeRequest) snapshot.getRequests().get(0))
+            .getSegmentSchemas()
+            .getSegmentSchemaList()
+            .get(0)
+    );
+    Assert.assertEquals(1, snapshot.getRequests().size());
+    Assert.assertEquals(2, snapshot.getCounter().getCounter());
+  }
+
   private void testBatchAnnounce(boolean testHistory) throws Exception
   {
     segmentAnnouncer.announceSegments(testSegments);
@@ -511,9 +606,7 @@ public class BatchDataSegmentAnnouncerTest
       try {
         if (cf.checkExists().forPath(path) != null) {
           return jsonMapper.readValue(
-              cf.getData().forPath(path), new TypeReference<Set<DataSegment>>()
-              {
-              }
+              cf.getData().forPath(path), new TypeReference<>() {}
           );
         }
       }

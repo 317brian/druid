@@ -20,8 +20,6 @@
 package org.apache.druid.query.metadata;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.io.CharSource;
-import com.google.common.io.Resources;
 import org.apache.druid.data.input.InputRowSchema;
 import org.apache.druid.data.input.impl.DimensionSchema;
 import org.apache.druid.data.input.impl.DimensionsSpec;
@@ -45,6 +43,7 @@ import org.apache.druid.query.metadata.metadata.SegmentAnalysis;
 import org.apache.druid.query.metadata.metadata.SegmentMetadataQuery;
 import org.apache.druid.query.spec.LegacySegmentSpec;
 import org.apache.druid.segment.ColumnSelectorFactory;
+import org.apache.druid.segment.Cursors;
 import org.apache.druid.segment.IncrementalIndexSegment;
 import org.apache.druid.segment.IndexBuilder;
 import org.apache.druid.segment.QueryableIndex;
@@ -56,13 +55,11 @@ import org.apache.druid.segment.column.ColumnBuilder;
 import org.apache.druid.segment.column.ColumnCapabilitiesImpl;
 import org.apache.druid.segment.column.ColumnHolder;
 import org.apache.druid.segment.column.ColumnType;
-import org.apache.druid.segment.column.StringDictionaryEncodedColumn;
+import org.apache.druid.segment.column.StringUtf8DictionaryEncodedColumn;
 import org.apache.druid.segment.column.ValueType;
-import org.apache.druid.segment.data.ListIndexed;
 import org.apache.druid.segment.data.ObjectStrategy;
 import org.apache.druid.segment.incremental.IncrementalIndex;
 import org.apache.druid.segment.incremental.IncrementalIndexSchema;
-import org.apache.druid.segment.incremental.OnheapIncrementalIndex;
 import org.apache.druid.segment.serde.ComplexMetricExtractor;
 import org.apache.druid.segment.serde.ComplexMetricSerde;
 import org.apache.druid.segment.serde.ComplexMetrics;
@@ -77,9 +74,7 @@ import org.junit.rules.TemporaryFolder;
 import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
-import java.net.URL;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -249,7 +244,15 @@ public class SegmentAnalyzerTest extends InitializedNullHandlingTest
     );
 
     final SegmentMetadataQuery query = new SegmentMetadataQuery(
-        new TableDataSource("test"), new LegacySegmentSpec("2011/2012"), null, null, null, analyses, false, false
+        new TableDataSource("test"),
+        new LegacySegmentSpec("2011/2012"),
+        null,
+        null,
+        null,
+        analyses,
+        false,
+        null,
+        null
     );
     return runner.run(QueryPlus.wrap(query)).toList();
   }
@@ -294,8 +297,6 @@ public class SegmentAnalyzerTest extends InitializedNullHandlingTest
   @Test
   public void testAnalyzingSegmentWithNonExistentAggregator() throws IOException
   {
-    final URL resource = SegmentAnalyzerTest.class.getClassLoader().getResource("druid.sample.numeric.tsv");
-    CharSource source = Resources.asByteSource(resource).asCharSource(StandardCharsets.UTF_8);
     String invalid_aggregator = "invalid_aggregator";
     AggregatorFactory[] metrics = new AggregatorFactory[]{
         new DoubleSumAggregatorFactory(TestIndex.DOUBLE_METRICS[0], "index"),
@@ -304,17 +305,17 @@ public class SegmentAnalyzerTest extends InitializedNullHandlingTest
     };
     final IncrementalIndexSchema schema = new IncrementalIndexSchema.Builder()
         .withMinTimestamp(DateTimes.of("2011-01-12T00:00:00.000Z").getMillis())
-        .withTimestampSpec(new TimestampSpec("ds", "auto", null))
+        .withTimestampSpec(new TimestampSpec("ts", "auto", null))
         .withDimensionsSpec(TestIndex.DIMENSIONS_SPEC)
         .withMetrics(metrics)
         .withRollup(true)
         .build();
 
-    final IncrementalIndex retVal = new OnheapIncrementalIndex.Builder()
-        .setIndexSchema(schema)
-        .setMaxRowCount(10000)
-        .build();
-    IncrementalIndex incrementalIndex = TestIndex.loadIncrementalIndex(retVal, source);
+    IncrementalIndex incrementalIndex = TestIndex.makeIncrementalIndexFromResource(
+        TestIndex.SAMPLE_NUMERIC_JSON,
+        schema,
+        TestIndex.DEFAULT_JSON_INPUT_FORMAT
+    );
 
     // Analyze the in-memory segment.
     {
@@ -421,20 +422,20 @@ public class SegmentAnalyzerTest extends InitializedNullHandlingTest
     QueryableIndex mockIndex = EasyMock.createMock(QueryableIndex.class);
     EasyMock.expect(mockIndex.getNumRows()).andReturn(100).atLeastOnce();
     EasyMock.expect(mockIndex.getColumnNames()).andReturn(Collections.singletonList("x")).atLeastOnce();
-    EasyMock.expect(mockIndex.getAvailableDimensions())
-            .andReturn(new ListIndexed<>(Collections.singletonList("x")))
-            .atLeastOnce();
     EasyMock.expect(mockIndex.getColumnCapabilities(ColumnHolder.TIME_COLUMN_NAME))
             .andReturn(ColumnCapabilitiesImpl.createDefault().setType(ColumnType.LONG))
             .atLeastOnce();
     EasyMock.expect(mockIndex.getColumnCapabilities("x"))
             .andReturn(ColumnCapabilitiesImpl.createDefault().setType(ColumnType.UNKNOWN_COMPLEX))
             .atLeastOnce();
+    EasyMock.expect(mockIndex.getOrdering())
+            .andReturn(Cursors.ascendingTimeOrder())
+            .atLeastOnce();
 
     ColumnHolder holder = EasyMock.createMock(ColumnHolder.class);
     EasyMock.expect(mockIndex.getColumnHolder("x")).andReturn(holder).atLeastOnce();
 
-    StringDictionaryEncodedColumn dictionaryEncodedColumn = EasyMock.createMock(StringDictionaryEncodedColumn.class);
+    StringUtf8DictionaryEncodedColumn dictionaryEncodedColumn = EasyMock.createMock(StringUtf8DictionaryEncodedColumn.class);
     EasyMock.expect(holder.getColumn()).andReturn(dictionaryEncodedColumn).atLeastOnce();
 
     dictionaryEncodedColumn.close();
@@ -534,12 +535,6 @@ public class SegmentAnalyzerTest extends InitializedNullHandlingTest
 
     @Override
     public AggregatorFactory getCombiningFactory()
-    {
-      return null;
-    }
-
-    @Override
-    public List<AggregatorFactory> getRequiredColumns()
     {
       return null;
     }

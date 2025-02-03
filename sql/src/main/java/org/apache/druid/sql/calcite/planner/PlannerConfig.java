@@ -20,10 +20,12 @@
 package org.apache.druid.sql.calcite.planner;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.druid.error.DruidException;
 import org.apache.druid.java.util.common.UOE;
 import org.apache.druid.query.QueryContexts;
 import org.joda.time.DateTimeZone;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -37,7 +39,6 @@ public class PlannerConfig
   public static final String CTX_KEY_FORCE_EXPRESSION_VIRTUAL_COLUMNS = "forceExpressionVirtualColumns";
   public static final String CTX_MAX_NUMERIC_IN_FILTERS = "maxNumericInFilters";
   public static final int NUM_FILTER_NOT_USED = -1;
-
   @JsonProperty
   private int maxTopNLimit = 100_000;
 
@@ -71,7 +72,8 @@ public class PlannerConfig
   @JsonProperty
   private int maxNumericInFilters = NUM_FILTER_NOT_USED;
 
-  private boolean serializeComplexValues = true;
+  @JsonProperty
+  private String nativeQuerySqlPlanningMode = QueryContexts.NATIVE_QUERY_SQL_PLANNING_MODE_COUPLED; // can be COUPLED or DECOUPLED
 
   public int getMaxNumericInFilters()
   {
@@ -108,11 +110,6 @@ public class PlannerConfig
     return sqlTimeZone;
   }
 
-  public boolean shouldSerializeComplexValues()
-  {
-    return serializeComplexValues;
-  }
-
   public boolean isComputeInnerJoinCostAsFilter()
   {
     return computeInnerJoinCostAsFilter;
@@ -135,6 +132,11 @@ public class PlannerConfig
   public boolean isForceExpressionVirtualColumns()
   {
     return forceExpressionVirtualColumns;
+  }
+
+  public String getNativeQuerySqlPlanningMode()
+  {
+    return nativeQuerySqlPlanningMode;
   }
 
   public PlannerConfig withOverrides(final Map<String, Object> queryContext)
@@ -161,14 +163,14 @@ public class PlannerConfig
            useApproximateCountDistinct == that.useApproximateCountDistinct &&
            useApproximateTopN == that.useApproximateTopN &&
            requireTimeCondition == that.requireTimeCondition &&
-           serializeComplexValues == that.serializeComplexValues &&
            Objects.equals(sqlTimeZone, that.sqlTimeZone) &&
            useNativeQueryExplain == that.useNativeQueryExplain &&
            forceExpressionVirtualColumns == that.forceExpressionVirtualColumns &&
            useGroupingSetForExactDistinct == that.useGroupingSetForExactDistinct &&
            computeInnerJoinCostAsFilter == that.computeInnerJoinCostAsFilter &&
            authorizeSystemTablesDirectly == that.authorizeSystemTablesDirectly &&
-           maxNumericInFilters == that.maxNumericInFilters;
+           maxNumericInFilters == that.maxNumericInFilters &&
+           nativeQuerySqlPlanningMode.equals(that.nativeQuerySqlPlanningMode);
   }
 
   @Override
@@ -181,9 +183,9 @@ public class PlannerConfig
         useApproximateTopN,
         requireTimeCondition,
         sqlTimeZone,
-        serializeComplexValues,
         useNativeQueryExplain,
-        forceExpressionVirtualColumns
+        forceExpressionVirtualColumns,
+        nativeQuerySqlPlanningMode
     );
   }
 
@@ -196,8 +198,8 @@ public class PlannerConfig
            ", useApproximateTopN=" + useApproximateTopN +
            ", requireTimeCondition=" + requireTimeCondition +
            ", sqlTimeZone=" + sqlTimeZone +
-           ", serializeComplexValues=" + serializeComplexValues +
            ", useNativeQueryExplain=" + useNativeQueryExplain +
+           ", nativeQuerySqlPlanningMode=" + nativeQuerySqlPlanningMode +
            '}';
   }
 
@@ -230,7 +232,7 @@ public class PlannerConfig
     private boolean useNativeQueryExplain;
     private boolean forceExpressionVirtualColumns;
     private int maxNumericInFilters;
-    private boolean serializeComplexValues;
+    private String nativeQuerySqlPlanningMode;
 
     public Builder(PlannerConfig base)
     {
@@ -248,7 +250,7 @@ public class PlannerConfig
       useNativeQueryExplain = base.isUseNativeQueryExplain();
       forceExpressionVirtualColumns = base.isForceExpressionVirtualColumns();
       maxNumericInFilters = base.getMaxNumericInFilters();
-      serializeComplexValues = base.shouldSerializeComplexValues();
+      nativeQuerySqlPlanningMode = base.getNativeQuerySqlPlanningMode();
     }
 
     public Builder requireTimeCondition(boolean option)
@@ -305,15 +307,15 @@ public class PlannerConfig
       return this;
     }
 
-    public Builder serializeComplexValues(boolean option)
-    {
-      this.serializeComplexValues = option;
-      return this;
-    }
-
     public Builder useNativeQueryExplain(boolean option)
     {
       this.useNativeQueryExplain = option;
+      return this;
+    }
+
+    public Builder nativeQuerySqlPlanningMode(String mode)
+    {
+      this.nativeQuerySqlPlanningMode = mode;
       return this;
     }
 
@@ -357,6 +359,11 @@ public class PlannerConfig
       maxNumericInFilters = validateMaxNumericInFilters(
           queryContextMaxNumericInFilters,
           maxNumericInFilters);
+      nativeQuerySqlPlanningMode = QueryContexts.parseString(
+          queryContext,
+          QueryContexts.CTX_NATIVE_QUERY_SQL_PLANNING_MODE,
+          nativeQuerySqlPlanningMode
+      );
       return this;
     }
 
@@ -396,8 +403,41 @@ public class PlannerConfig
       config.useNativeQueryExplain = useNativeQueryExplain;
       config.maxNumericInFilters = maxNumericInFilters;
       config.forceExpressionVirtualColumns = forceExpressionVirtualColumns;
-      config.serializeComplexValues = serializeComplexValues;
+      config.nativeQuerySqlPlanningMode = nativeQuerySqlPlanningMode;
       return config;
     }
+  }
+
+  /**
+   * Translates {@link PlannerConfig} settings into its equivalent QueryContext map.
+   *
+   * @throws DruidException if the translation is not possible.
+   */
+  public Map<String, Object> getNonDefaultAsQueryContext()
+  {
+    Map<String, Object> overrides = new HashMap<>();
+    PlannerConfig def = new PlannerConfig();
+    if (def.useApproximateCountDistinct != useApproximateCountDistinct) {
+      overrides.put(
+          CTX_KEY_USE_APPROXIMATE_COUNT_DISTINCT,
+          String.valueOf(useApproximateCountDistinct)
+      );
+    }
+    if (def.useGroupingSetForExactDistinct != useGroupingSetForExactDistinct) {
+      overrides.put(
+          CTX_KEY_USE_GROUPING_SET_FOR_EXACT_DISTINCT,
+          String.valueOf(useGroupingSetForExactDistinct)
+      );
+    }
+
+    PlannerConfig newConfig = PlannerConfig.builder().withOverrides(overrides).build();
+    if (!equals(newConfig)) {
+      throw DruidException.defensive(
+          "Not all PlannerConfig options are not persistable as QueryContext keys!\nold: %s\nnew: %s",
+          this,
+          newConfig
+      );
+    }
+    return overrides;
   }
 }

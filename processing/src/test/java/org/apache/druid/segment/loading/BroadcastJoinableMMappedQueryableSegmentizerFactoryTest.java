@@ -36,6 +36,7 @@ import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.Segment;
 import org.apache.druid.segment.SegmentLazyLoadFailCallback;
 import org.apache.druid.segment.TestIndex;
+import org.apache.druid.segment.column.ColumnConfig;
 import org.apache.druid.segment.incremental.IncrementalIndex;
 import org.apache.druid.segment.join.table.BroadcastSegmentIndexedTable;
 import org.apache.druid.segment.join.table.IndexedTable;
@@ -67,7 +68,7 @@ public class BroadcastJoinableMMappedQueryableSegmentizerFactoryTest extends Ini
   {
     final ObjectMapper mapper = new DefaultObjectMapper();
     mapper.registerModule(new SegmentizerModule());
-    final IndexIO indexIO = new IndexIO(mapper, () -> 0);
+    final IndexIO indexIO = new IndexIO(mapper, ColumnConfig.DEFAULT);
     mapper.setInjectableValues(
         new InjectableValues.Std()
             .addValue(ExprMacroTable.class.getName(), TestExprMacroTable.INSTANCE)
@@ -83,7 +84,7 @@ public class BroadcastJoinableMMappedQueryableSegmentizerFactoryTest extends Ini
         KEY_COLUMNS
     );
     Interval testInterval = Intervals.of("2011-01-12T00:00:00.000Z/2011-05-01T00:00:00.000Z");
-    IncrementalIndex data = TestIndex.makeRealtimeIndex("druid.sample.numeric.tsv");
+    IncrementalIndex data = TestIndex.makeSampleNumericIncrementalIndex();
 
     List<String> columnNames = data.getColumnNames();
     File segment = new File(temporaryFolder.newFolder(), "segment");

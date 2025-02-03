@@ -19,16 +19,17 @@
 
 package org.apache.druid.math.expr;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.NonnullPair;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.logger.Logger;
 import org.apache.druid.math.expr.vector.ExprEvalVector;
+import org.apache.druid.math.expr.vector.ExprVectorProcessor;
+import org.apache.druid.query.expression.NestedDataExpressions;
 import org.apache.druid.testing.InitializedNullHandlingTest;
-import org.junit.AfterClass;
 import org.junit.Assert;
-import org.junit.BeforeClass;
+import org.junit.Assume;
 import org.junit.Test;
 
 import javax.annotation.Nullable;
@@ -53,6 +54,12 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
   private static final int NUM_ITERATIONS = 10;
   private static final int VECTOR_SIZE = 512;
 
+  private static final ExprMacroTable MACRO_TABLE = new ExprMacroTable(
+      ImmutableList.of(
+          new NestedDataExpressions.JsonObjectExprMacro()
+      )
+  );
+
   final Map<String, ExpressionType> types = ImmutableMap.<String, ExpressionType>builder()
       .put("l1", ExpressionType.LONG)
       .put("l2", ExpressionType.LONG)
@@ -63,18 +70,6 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
       .put("boolString1", ExpressionType.STRING)
       .put("boolString2", ExpressionType.STRING)
       .build();
-
-  @BeforeClass
-  public static void setupTests()
-  {
-    ExpressionProcessing.initializeForStrictBooleansTests(true);
-  }
-
-  @AfterClass
-  public static void teardownTests()
-  {
-    ExpressionProcessing.initializeForTests();
-  }
 
   @Test
   public void testUnaryOperators()
@@ -127,7 +122,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
   public void testBinaryLogicOperators()
   {
     final String[] functions = new String[]{"&&", "||"};
-    final String[] templates = new String[]{"d1 %s d2", "l1 %s l2", "boolString1 %s boolString2"};
+    final String[] templates = new String[]{"d1 %s d2", "l1 %s l2", "boolString1 %s boolString2", "(d1 == d2) %s (l1 == l2)"};
     testFunctions(types, templates, functions);
   }
 
@@ -189,7 +184,8 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
         "bitwiseConvertDoubleToLongBits",
         "bitwiseConvertLongBitsToDouble"
     };
-    final String[] templates = new String[]{"%s(l1)", "%s(d1)", "%s(pi())", "%s(null)"};
+    final String[] templates;
+    templates = new String[]{"%s(l1)", "%s(d1)", "%s(pi())", "%s(null)", "%s(missing)"};
     testFunctions(types, templates, functions);
   }
 
@@ -245,7 +241,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
   public void testCast()
   {
     final String[] columns = new String[]{"d1", "l1", "s1"};
-    final String[] castTo = new String[]{"'STRING'", "'LONG'", "'DOUBLE'"};
+    final String[] castTo = new String[]{"'STRING'", "'LONG'", "'DOUBLE'", "'ARRAY<STRING>'", "'ARRAY<LONG>'", "'ARRAY<DOUBLE>'"};
     final String[][] args = makeTemplateArgs(columns, castTo);
     final String[] templates = new String[]{"cast(%s, %s)"};
     testFunctions(types, templates, args);
@@ -261,6 +257,39 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
   }
 
   @Test
+  public void testArrayFns()
+  {
+    try {
+      ExpressionProcessing.initializeForFallback();
+      testExpression("array(s1, s2)", types);
+      testExpression("array(l1, l2)", types);
+      testExpression("array(d1, d2)", types);
+      testExpression("array(l1, d2)", types);
+      testExpression("array(s1, l2)", types);
+    }
+    finally {
+      ExpressionProcessing.initializeForTests();
+    }
+  }
+
+  @Test
+  public void testCastArraysRoundTrip()
+  {
+    testExpression("cast(cast(s1, 'ARRAY<STRING>'), 'STRING')", types);
+    testExpression("cast(cast(d1, 'ARRAY<DOUBLE>'), 'DOUBLE')", types);
+    testExpression("cast(cast(d1, 'ARRAY<STRING>'), 'DOUBLE')", types);
+    testExpression("cast(cast(l1, 'ARRAY<LONG>'), 'LONG')", types);
+    testExpression("cast(cast(l1, 'ARRAY<STRING>'), 'LONG')", types);
+  }
+
+  @Test
+  public void testJsonFns()
+  {
+    Assume.assumeTrue(ExpressionProcessing.allowVectorizeFallback());
+    testExpression("json_object('k1', s1, 'k2', l1)", types);
+  }
+
+  @Test
   public void testConstants()
   {
     testExpression("null", types);
@@ -270,6 +299,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     testExpression("Infinity", types);
     testExpression("-Infinity", types);
     testExpression("'hello'", types);
+    testExpression("json_object('a', 1, 'b', 'abc', 'c', 3.3, 'd', array(1,2,3))", types);
   }
 
   static void testFunctions(Map<String, ExpressionType> types, String[] templates, String[] args)
@@ -295,23 +325,19 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
   static void testExpression(String expr, Map<String, ExpressionType> types)
   {
     log.debug("[%s]", expr);
-    Expr parsed = Parser.parse(expr, ExprMacroTable.nil());
+    Expr parsed = Parser.parse(expr, MACRO_TABLE);
 
-    NonnullPair<Expr.ObjectBinding[], Expr.VectorInputBinding> bindings;
-    for (int iterations = 0; iterations < NUM_ITERATIONS; iterations++) {
-      bindings = makeRandomizedBindings(VECTOR_SIZE, types);
-      testExpressionWithBindings(expr, parsed, bindings);
-    }
-    bindings = makeSequentialBinding(VECTOR_SIZE, types);
-    testExpressionWithBindings(expr, parsed, bindings);
+    testExpression(expr, parsed, types, NUM_ITERATIONS);
+    testSequentialBinding(expr, parsed, types);
   }
 
-  public static void testExpressionWithBindings(
+  public static void testSequentialBinding(
       String expr,
       Expr parsed,
-      NonnullPair<Expr.ObjectBinding[], Expr.VectorInputBinding> bindings
+      Map<String, ExpressionType> types
   )
   {
+    NonnullPair<Expr.ObjectBinding[], Expr.VectorInputBinding> bindings = makeSequentialBinding(VECTOR_SIZE, types);
     Assert.assertTrue(StringUtils.format("Cannot vectorize %s", expr), parsed.canVectorize(bindings.rhs));
     ExpressionType outputType = parsed.getOutputType(bindings.rhs);
     ExprEvalVector<?> vectorEval = parsed.asVectorProcessor(bindings.rhs).evalVector(bindings.rhs);
@@ -326,11 +352,76 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
       if (outputType != null && !eval.isNumericNull()) {
         Assert.assertEquals(eval.type(), outputType);
       }
-      Assert.assertEquals(
-          StringUtils.format("Values do not match for row %s for expression %s", i, expr),
-          eval.valueOrDefault(),
-          vectorVals[i]
-      );
+      if (outputType != null && outputType.isArray()) {
+        Assert.assertArrayEquals(
+            StringUtils.format("Values do not match for row %s for expression %s", i, expr),
+            (Object[]) eval.valueOrDefault(),
+            (Object[]) vectorVals[i]
+        );
+      } else {
+        Assert.assertEquals(
+            StringUtils.format("Values do not match for row %s for expression %s", i, expr),
+            eval.valueOrDefault(),
+            vectorVals[i]
+        );
+      }
+    }
+  }
+
+  public static void testExpression(
+      String expr,
+      Expr parsed,
+      Map<String, ExpressionType> types,
+      int numIterations
+  )
+  {
+    Expr.InputBindingInspector inspector = InputBindings.inspectorFromTypeMap(types);
+    Expr.VectorInputBindingInspector vectorInputBindingInspector = new Expr.VectorInputBindingInspector()
+    {
+      @Override
+      public int getMaxVectorSize()
+      {
+        return VECTOR_SIZE;
+      }
+
+      @Nullable
+      @Override
+      public ExpressionType getType(String name)
+      {
+        return inspector.getType(name);
+      }
+    };
+    Assert.assertTrue(StringUtils.format("Cannot vectorize %s", expr), parsed.canVectorize(inspector));
+    ExpressionType outputType = parsed.getOutputType(inspector);
+    final ExprVectorProcessor processor = parsed.asVectorProcessor(vectorInputBindingInspector);
+    // 'null' expressions can have an output type of null, but still evaluate in default mode, so skip type checks
+    if (outputType != null) {
+      Assert.assertEquals(expr, outputType, processor.getOutputType());
+    }
+    for (int iterations = 0; iterations < numIterations; iterations++) {
+      NonnullPair<Expr.ObjectBinding[], Expr.VectorInputBinding> bindings = makeRandomizedBindings(VECTOR_SIZE, types);
+      ExprEvalVector<?> vectorEval = processor.evalVector(bindings.rhs);
+      final Object[] vectorVals = vectorEval.getObjectVector();
+      for (int i = 0; i < VECTOR_SIZE; i++) {
+        ExprEval<?> eval = parsed.eval(bindings.lhs[i]);
+        // 'null' expressions can have an output type of null, but still evaluate in default mode, so skip type checks
+        if (outputType != null && !eval.isNumericNull()) {
+          Assert.assertEquals(eval.type(), outputType);
+        }
+        if (outputType != null && outputType.isArray()) {
+          Assert.assertArrayEquals(
+              StringUtils.format("Values do not match for row %s for expression %s", i, expr),
+              (Object[]) eval.valueOrDefault(),
+              (Object[]) vectorVals[i]
+          );
+        } else {
+          Assert.assertEquals(
+              StringUtils.format("Values do not match for row %s for expression %s", i, expr),
+              eval.valueOrDefault(),
+              vectorVals[i]
+          );
+        }
+      }
     }
   }
 
@@ -346,7 +437,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
         types,
         () -> r.nextLong(Integer.MAX_VALUE - 1),
         r::nextDouble,
-        r::nextBoolean,
+        () -> r.nextDouble(0, 1.0) > 0.9,
         () -> String.valueOf(r.nextInt())
     );
   }
@@ -381,7 +472,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
           }
         },
         () -> ThreadLocalRandom.current().nextBoolean(),
-        new Supplier<String>()
+        new Supplier<>()
         {
           int counter = 1;
 
@@ -406,7 +497,6 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     SettableVectorInputBinding vectorBinding = new SettableVectorInputBinding(vectorSize);
     SettableObjectBinding[] objectBindings = new SettableObjectBinding[vectorSize];
 
-    final boolean hasNulls = NullHandling.sqlCompatible();
     for (Map.Entry<String, ExpressionType> entry : types.entrySet()) {
       boolean[] nulls = new boolean[vectorSize];
 
@@ -414,39 +504,31 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
         case LONG:
           long[] longs = new long[vectorSize];
           for (int i = 0; i < vectorSize; i++) {
-            nulls[i] = hasNulls && nullsFn.getAsBoolean();
+            nulls[i] = nullsFn.getAsBoolean();
             longs[i] = nulls[i] ? 0L : longsFn.getAsLong();
             if (objectBindings[i] == null) {
               objectBindings[i] = new SettableObjectBinding();
             }
             objectBindings[i].withBinding(entry.getKey(), nulls[i] ? null : longs[i]);
           }
-          if (hasNulls) {
-            vectorBinding.addLong(entry.getKey(), longs, nulls);
-          } else {
-            vectorBinding.addLong(entry.getKey(), longs);
-          }
+          vectorBinding.addLong(entry.getKey(), longs, nulls);
           break;
         case DOUBLE:
           double[] doubles = new double[vectorSize];
           for (int i = 0; i < vectorSize; i++) {
-            nulls[i] = hasNulls && nullsFn.getAsBoolean();
+            nulls[i] = nullsFn.getAsBoolean();
             doubles[i] = nulls[i] ? 0.0 : doublesFn.getAsDouble();
             if (objectBindings[i] == null) {
               objectBindings[i] = new SettableObjectBinding();
             }
             objectBindings[i].withBinding(entry.getKey(), nulls[i] ? null : doubles[i]);
           }
-          if (hasNulls) {
-            vectorBinding.addDouble(entry.getKey(), doubles, nulls);
-          } else {
-            vectorBinding.addDouble(entry.getKey(), doubles);
-          }
+          vectorBinding.addDouble(entry.getKey(), doubles, nulls);
           break;
         case STRING:
           String[] strings = new String[vectorSize];
           for (int i = 0; i < vectorSize; i++) {
-            nulls[i] = hasNulls && nullsFn.getAsBoolean();
+            nulls[i] = nullsFn.getAsBoolean();
             if (!nulls[i] && entry.getKey().startsWith("boolString")) {
               strings[i] = String.valueOf(nullsFn.getAsBoolean());
             } else {
@@ -481,7 +563,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
                  .toArray(String[][]::new);
   }
 
-  static class SettableVectorInputBinding implements Expr.VectorInputBinding
+  public static class SettableVectorInputBinding implements Expr.VectorInputBinding
   {
     private final Map<String, boolean[]> nulls;
     private final Map<String, long[]> longs;
@@ -493,7 +575,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
 
     private int id = 0;
 
-    SettableVectorInputBinding(int vectorSize)
+    public SettableVectorInputBinding(int vectorSize)
     {
       this.nulls = new HashMap<>();
       this.longs = new HashMap<>();
@@ -519,6 +601,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     {
       assert longs.length == vectorSize;
       this.longs.put(name, longs);
+      this.doubles.put(name, Arrays.stream(longs).asDoubleStream().toArray());
       return addBinding(name, ExpressionType.LONG, nulls);
     }
 
@@ -531,10 +614,11 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     {
       assert doubles.length == vectorSize;
       this.doubles.put(name, doubles);
+      this.longs.put(name, Arrays.stream(doubles).mapToLong(x -> (long) x).toArray());
       return addBinding(name, ExpressionType.DOUBLE, nulls);
     }
 
-    public SettableVectorInputBinding addString(String name, String[] strings)
+    public SettableVectorInputBinding addString(String name, Object[] strings)
     {
       assert strings.length == vectorSize;
       this.objects.put(name, strings);
@@ -542,9 +626,9 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     }
 
     @Override
-    public <T> T[] getObjectVector(String name)
+    public Object[] getObjectVector(String name)
     {
-      return (T[]) objects.getOrDefault(name, new Object[getCurrentVectorSize()]);
+      return objects.getOrDefault(name, new Object[getCurrentVectorSize()]);
     }
 
     @Override
@@ -570,7 +654,7 @@ public class VectorExprSanityTest extends InitializedNullHandlingTest
     public boolean[] getNullVector(String name)
     {
       final boolean[] defaultVector = new boolean[getCurrentVectorSize()];
-      Arrays.fill(defaultVector, NullHandling.sqlCompatible());
+      Arrays.fill(defaultVector, true);
       return nulls.getOrDefault(name, defaultVector);
     }
 

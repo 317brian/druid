@@ -118,6 +118,21 @@ public class RemoteTaskRunnerTestUtils
       HttpClient httpClient
   )
   {
+    return makeRemoteTaskRunner(
+        config,
+        provisioningStrategy,
+        httpClient,
+        DefaultWorkerBehaviorConfig.defaultConfig()
+    );
+  }
+
+  public RemoteTaskRunner makeRemoteTaskRunner(
+      RemoteTaskRunnerConfig config,
+      ProvisioningStrategy<WorkerTaskRunner> provisioningStrategy,
+      HttpClient httpClient,
+      WorkerBehaviorConfig workerBehaviorConfig
+  )
+  {
     RemoteTaskRunner remoteTaskRunner = new TestableRemoteTaskRunner(
         jsonMapper,
         config,
@@ -134,7 +149,7 @@ public class RemoteTaskRunnerTestUtils
         cf,
         new PathChildrenCacheFactory.Builder(),
         httpClient,
-        DSuppliers.of(new AtomicReference<>(DefaultWorkerBehaviorConfig.defaultConfig())),
+        DSuppliers.of(new AtomicReference<>(workerBehaviorConfig)),
         provisioningStrategy
     );
 
@@ -219,7 +234,7 @@ public class RemoteTaskRunnerTestUtils
     return pathExists(JOINER.join(STATUS_PATH, workerId, taskId));
   }
 
-  boolean taskAnnounced(final String workerId, final String taskId)
+  boolean taskAssigned(final String workerId, final String taskId)
   {
     return pathExists(JOINER.join(TASKS_PATH, workerId, taskId));
   }

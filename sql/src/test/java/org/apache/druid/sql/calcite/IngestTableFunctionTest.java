@@ -22,12 +22,19 @@ package org.apache.druid.sql.calcite;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+import com.google.inject.Binder;
 import org.apache.calcite.avatica.SqlType;
 import org.apache.druid.catalog.model.Columns;
 import org.apache.druid.data.input.impl.CsvInputFormat;
 import org.apache.druid.data.input.impl.HttpInputSource;
 import org.apache.druid.data.input.impl.HttpInputSourceConfig;
+import org.apache.druid.data.input.impl.JsonInputFormat;
 import org.apache.druid.data.input.impl.LocalInputSource;
+import org.apache.druid.data.input.impl.systemfield.SystemFields;
+import org.apache.druid.initialization.DruidModule;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.java.util.common.UOE;
@@ -42,14 +49,20 @@ import org.apache.druid.sql.calcite.external.Externals;
 import org.apache.druid.sql.calcite.filtration.Filtration;
 import org.apache.druid.sql.calcite.planner.Calcites;
 import org.apache.druid.sql.calcite.util.CalciteTests;
+import org.apache.druid.sql.calcite.util.DruidModuleCollection;
 import org.apache.druid.sql.http.SqlParameter;
-import org.junit.Test;
+import org.hamcrest.CoreMatchers;
+import org.junit.internal.matchers.ThrowableMessageMatcher;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.Collections;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests the input-source-specific table functions: http, inline and localfiles.
@@ -61,6 +74,7 @@ import java.util.Collections;
  * query ensure that the resulting MSQ task is identical regardless of the path
  * taken.
  */
+@SqlTestFrameworkConfig.ComponentSupplier(IngestTableFunctionTest.ExportComponentSupplier.class)
 public class IngestTableFunctionTest extends CalciteIngestionDmlTest
 {
   protected static URI toURI(String uri)
@@ -78,9 +92,25 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
           Collections.singletonList(toURI("http://foo.com/bar.csv")),
           "bob",
           new DefaultPasswordProvider("secret"),
-          new HttpInputSourceConfig(null)
+          SystemFields.none(),
+          null,
+          new HttpInputSourceConfig(null, null)
       ),
-      new CsvInputFormat(ImmutableList.of("x", "y", "z"), null, false, false, 0),
+      new CsvInputFormat(ImmutableList.of("x", "y", "z"), null, false, false, 0, null),
+      RowSignature.builder()
+                  .add("x", ColumnType.STRING)
+                  .add("y", ColumnType.STRING)
+                  .add("z", ColumnType.LONG)
+                  .build()
+  );
+  protected final ExternalDataSource localDataSource = new ExternalDataSource(
+      new LocalInputSource(
+          null,
+          null,
+          Arrays.asList(new File("/tmp/foo.csv"), new File("/tmp/bar.csv")),
+          SystemFields.none()
+      ),
+      new CsvInputFormat(ImmutableList.of("x", "y", "z"), null, false, false, 0, null),
       RowSignature.builder()
                   .add("x", ColumnType.STRING)
                   .add("y", ColumnType.STRING)
@@ -104,6 +134,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -133,6 +164,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
         )
@@ -163,6 +195,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
         )
@@ -205,6 +238,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -235,6 +269,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -250,9 +285,11 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
             Arrays.asList(toURI("http://example.com/foo.csv"), toURI("http://example.com/bar.csv")),
             "bob",
             new DefaultPasswordProvider("secret"),
-            new HttpInputSourceConfig(null)
+            SystemFields.none(),
+            ImmutableMap.of("Accept", "application/ndjson", "a", "b"),
+            new HttpInputSourceConfig(null, Sets.newHashSet("Accept", "a"))
         ),
-        new CsvInputFormat(ImmutableList.of("timestamp", "isRobot"), null, false, false, 0),
+        new CsvInputFormat(ImmutableList.of("timestamp", "isRobot"), null, false, false, 0, null),
         RowSignature.builder()
                     .add("timestamp", ColumnType.STRING)
                     .add("isRobot", ColumnType.STRING)
@@ -271,7 +308,8 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
              "  userName => 'bob',\n" +
              "  password => 'secret',\n" +
              "  uris => ARRAY['http://example.com/foo.csv', 'http://example.com/bar.csv'],\n" +
-             "  format => 'csv'\n" +
+             "  format => 'csv',\n" +
+             "  headers=> '{\"Accept\":\"application/ndjson\", \"a\": \"b\" }'\n" +
              "  )\n" +
              ") EXTEND (\"timestamp\" VARCHAR, isRobot VARCHAR)\n" +
              "PARTITIONED BY HOUR")
@@ -283,7 +321,8 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .virtualColumns(expressionVirtualColumn("v0", "timestamp_parse(\"timestamp\",null,'UTC')", ColumnType.LONG))
-                .columns("isRobot", "v0")
+                .columns("v0", "isRobot")
+                .columnTypes(ColumnType.LONG, ColumnType.STRING)
                 .build()
          )
         .verify();
@@ -304,21 +343,9 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
         "                format => 'csv'))\n" +
         "     EXTEND (x VARCHAR, y VARCHAR, z BIGINT)\n" +
         "PARTITIONED BY ALL TIME";
-    final String explanation = "[{" +
-        "\"query\":{\"queryType\":\"scan\"," +
-        "\"dataSource\":{\"type\":\"external\"," +
-        "\"inputSource\":{\"type\":\"http\",\"uris\":[\"http://foo.com/bar.csv\"],\"httpAuthenticationUsername\":\"bob\",\"httpAuthenticationPassword\":{\"type\":\"default\",\"password\":\"secret\"}}," +
-        "\"inputFormat\":{\"type\":\"csv\",\"columns\":[\"x\",\"y\",\"z\"]},\"signature\":[{\"name\":\"x\",\"type\":\"STRING\"},{\"name\":\"y\",\"type\":\"STRING\"},{\"name\":\"z\",\"type\":\"LONG\"}]}," +
-        "\"intervals\":{\"type\":\"intervals\",\"intervals\":[\"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"]}," +
-        "\"resultFormat\":\"compactedList\",\"columns\":[\"x\",\"y\",\"z\"],\"legacy\":false," +
-        "\"context\":{\"defaultTimeout\":300000,\"maxScatterGatherBytes\":9223372036854775807,\"sqlCurrentTimestamp\":\"2000-01-01T00:00:00Z\"," +
-        "\"sqlInsertSegmentGranularity\":\"{\\\"type\\\":\\\"all\\\"}\"," +
-        "\"sqlQueryId\":\"dummy\",\"vectorize\":\"false\",\"vectorizeVirtualColumns\":\"false\"}," +
-        "\"granularity\":{\"type\":\"all\"}}," +
-        "\"signature\":[{\"name\":\"x\",\"type\":\"STRING\"},{\"name\":\"y\",\"type\":\"STRING\"},{\"name\":\"z\",\"type\":\"LONG\"}]," +
-        "\"columnMappings\":[{\"queryColumn\":\"x\",\"outputColumn\":\"x\"},{\"queryColumn\":\"y\",\"outputColumn\":\"y\"},{\"queryColumn\":\"z\",\"outputColumn\":\"z\"}]}]";
+    final String explanation = "[{\"query\":{\"queryType\":\"scan\",\"dataSource\":{\"type\":\"external\",\"inputSource\":{\"type\":\"http\",\"uris\":[\"http://foo.com/bar.csv\"],\"httpAuthenticationUsername\":\"bob\",\"httpAuthenticationPassword\":{\"type\":\"default\",\"password\":\"secret\"},\"requestHeaders\":{}},\"inputFormat\":{\"type\":\"csv\",\"columns\":[\"x\",\"y\",\"z\"]},\"signature\":[{\"name\":\"x\",\"type\":\"STRING\"},{\"name\":\"y\",\"type\":\"STRING\"},{\"name\":\"z\",\"type\":\"LONG\"}]},\"intervals\":{\"type\":\"intervals\",\"intervals\":[\"-146136543-09-08T08:23:32.096Z/146140482-04-24T15:36:27.903Z\"]},\"resultFormat\":\"compactedList\",\"columns\":[\"x\",\"y\",\"z\"],\"context\":{\"defaultTimeout\":300000,\"maxScatterGatherBytes\":9223372036854775807,\"sqlCurrentTimestamp\":\"2000-01-01T00:00:00Z\",\"sqlInsertSegmentGranularity\":\"{\\\"type\\\":\\\"all\\\"}\",\"sqlQueryId\":\"dummy\",\"vectorize\":\"false\",\"vectorizeVirtualColumns\":\"false\"},\"columnTypes\":[\"STRING\",\"STRING\",\"LONG\"],\"granularity\":{\"type\":\"all\"},\"legacy\":false},\"signature\":[{\"name\":\"x\",\"type\":\"STRING\"},{\"name\":\"y\",\"type\":\"STRING\"},{\"name\":\"z\",\"type\":\"LONG\"}],\"columnMappings\":[{\"queryColumn\":\"x\",\"outputColumn\":\"x\"},{\"queryColumn\":\"y\",\"outputColumn\":\"y\"},{\"queryColumn\":\"z\",\"outputColumn\":\"z\"}]}]";
     final String resources = "[{\"name\":\"EXTERNAL\",\"type\":\"EXTERNAL\"},{\"name\":\"dst\",\"type\":\"DATASOURCE\"}]";
-    final String attributes = "{\"statementType\":\"INSERT\",\"targetDataSource\":\"dst\"}";
+    final String attributes = "{\"statementType\":\"INSERT\",\"targetDataSource\":\"dst\",\"partitionedBy\":{\"type\":\"all\"}}";
 
     testQuery(
         PLANNER_CONFIG_NATIVE_QUERY_EXPLAIN,
@@ -345,16 +372,16 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
         "     EXTEND (x VARCHAR, y VARCHAR, z BIGINT)\n" +
         "PARTITIONED BY ALL TIME";
     didTest = true; // Else the framework will complain
-    testBuilder()
-        .plannerConfig(PLANNER_CONFIG_NATIVE_QUERY_EXPLAIN)
-        .sql(query)
-        // Regular user does not have permission on extern or other table functions
-        .authResult(CalciteTests.REGULAR_USER_AUTH_RESULT)
-        .expectedException(expected -> {
-          expected.expect(ForbiddenException.class);
-          expected.expectMessage(Access.DEFAULT_ERROR_MESSAGE);
-        })
-        .run();
+    ForbiddenException e = assertThrows(
+        ForbiddenException.class,
+        () -> testBuilder()
+            .plannerConfig(PLANNER_CONFIG_NATIVE_QUERY_EXPLAIN)
+            .sql(query)
+            // Regular user does not have permission on extern or other table functions
+            .authResult(CalciteTests.REGULAR_USER_AUTH_RESULT)
+            .run()
+    );
+    assertThat(e, ThrowableMessageMatcher.hasMessage(CoreMatchers.equalTo(Access.DEFAULT_ERROR_MESSAGE)));
   }
 
   @Test
@@ -377,6 +404,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -392,13 +420,19 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
             Collections.singletonList(toURI("http://foo.com/bar.json")),
             "bob",
             new DefaultPasswordProvider("secret"),
-            new HttpInputSourceConfig(null)
+            SystemFields.none(),
+            null,
+            new HttpInputSourceConfig(null, null)
         ),
-        new CsvInputFormat(ImmutableList.of("x", "y", "z"), null, false, false, 0),
+        new JsonInputFormat(null, null, null, null, null),
         RowSignature.builder()
                     .add("x", ColumnType.STRING)
                     .add("y", ColumnType.STRING)
                     .add("z", ColumnType.NESTED_DATA)
+                    .add("a", ColumnType.STRING_ARRAY)
+                    .add("b", ColumnType.LONG_ARRAY)
+                    .add("c", ColumnType.FLOAT_ARRAY)
+                    .add("d", ColumnType.DOUBLE_ARRAY)
                     .build()
         );
     testIngestionQuery()
@@ -406,8 +440,8 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
              "FROM TABLE(http(userName => 'bob',\n" +
             "                 password => 'secret',\n" +
              "                uris => ARRAY['http://foo.com/bar.json'],\n" +
-             "                format => 'csv'))\n" +
-             "     EXTEND (x VARCHAR, y VARCHAR, z TYPE('COMPLEX<json>'))\n" +
+             "                format => 'json'))\n" +
+             "     EXTEND (x VARCHAR, y VARCHAR, z TYPE('COMPLEX<json>'), a VARCHAR ARRAY, b BIGINT ARRAY, c FLOAT ARRAY, d DOUBLE ARRAY)\n" +
              "PARTITIONED BY ALL TIME")
         .authentication(CalciteTests.SUPER_USER_AUTH_RESULT)
         .expectTarget("dst", httpDataSource.getSignature())
@@ -416,7 +450,8 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
             newScanQueryBuilder()
                 .dataSource(httpDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
-                .columns("x", "y", "z")
+                .columns("x", "y", "z", "a", "b", "c", "d")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.ofComplex("json"), ColumnType.ofArray(ColumnType.STRING), ColumnType.ofArray(ColumnType.LONG), ColumnType.ofArray(ColumnType.FLOAT), ColumnType.ofArray(ColumnType.DOUBLE))
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -439,6 +474,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(externalDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -472,9 +508,9 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
       buf.append(sig.getColumnName(i)).append(" ");
       ColumnType type = sig.getColumnType(i).get();
       if (type == ColumnType.STRING) {
-        buf.append(Columns.VARCHAR);
+        buf.append(Columns.SQL_VARCHAR);
       } else if (type == ColumnType.LONG) {
-        buf.append(Columns.BIGINT);
+        buf.append(Columns.SQL_BIGINT);
       } else if (type == ColumnType.DOUBLE) {
         buf.append(Columns.DOUBLE);
       } else if (type == ColumnType.FLOAT) {
@@ -507,6 +543,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(externalDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -535,26 +572,13 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(externalDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
         .expectLogicalPlanFrom("insertFromExternal")
         .verify();
   }
-
-  protected final ExternalDataSource localDataSource = new ExternalDataSource(
-      new LocalInputSource(
-          null,
-          null,
-          Arrays.asList(new File("/tmp/foo.csv"), new File("/tmp/bar.csv"))
-      ),
-      new CsvInputFormat(ImmutableList.of("x", "y", "z"), null, false, false, 0),
-      RowSignature.builder()
-                  .add("x", ColumnType.STRING)
-                  .add("y", ColumnType.STRING)
-                  .add("z", ColumnType.LONG)
-                  .build()
-  );
 
   /**
    * Basic use of LOCALFILES
@@ -572,6 +596,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(localDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -600,6 +625,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(localDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -628,6 +654,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(localDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -658,6 +685,7 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(localDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
@@ -688,10 +716,39 @@ public class IngestTableFunctionTest extends CalciteIngestionDmlTest
                 .dataSource(localDataSource)
                 .intervals(querySegmentSpec(Filtration.eternity()))
                 .columns("x", "y", "z")
+                .columnTypes(ColumnType.STRING, ColumnType.STRING, ColumnType.LONG)
                 .context(CalciteIngestionDmlTest.PARTITIONED_BY_ALL_TIME_QUERY_CONTEXT)
                 .build()
          )
         .expectLogicalPlanFrom("localExtern")
         .verify();
+  }
+
+  protected static class ExportComponentSupplier extends IngestionDmlComponentSupplier
+  {
+    public ExportComponentSupplier(TempDirProducer tempFolderProducer)
+    {
+      super(tempFolderProducer);
+    }
+
+    @Override
+    public DruidModule getOverrideModule()
+    {
+      return DruidModuleCollection.of(
+            super.getOverrideModule(),
+            new LocalOverrideModule()
+          );
+    }
+
+    public static class LocalOverrideModule implements DruidModule
+    {
+      @Override
+      public void configure(Binder binder)
+      {
+        binder
+            .bind(HttpInputSourceConfig.class)
+            .toInstance(new HttpInputSourceConfig(null, ImmutableSet.of("Accept", "a")));
+      }
+    }
   }
 }

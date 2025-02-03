@@ -37,8 +37,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
-import org.skife.jdbi.v2.Handle;
-import org.skife.jdbi.v2.tweak.HandleCallback;
 
 import java.util.Collections;
 import java.util.List;
@@ -65,16 +63,9 @@ public class SQLMetadataSupervisorManagerTest
   public void cleanup()
   {
     connector.getDBI().withHandle(
-        new HandleCallback<Void>()
-        {
-          @Override
-          public Void withHandle(Handle handle)
-          {
-            handle.createStatement(StringUtils.format("DROP TABLE %s", tablesConfig.getSupervisorTable()))
-                  .execute();
-            return null;
-          }
-        }
+        handle -> handle.createStatement(StringUtils.format("DROP TABLE %s", tablesConfig.getSupervisorTable()))
+                .execute()
+
     );
   }
 
@@ -275,6 +266,9 @@ public class SQLMetadataSupervisorManagerTest
     specs = allSpecs.get(supervisor2);
     Assert.assertEquals(1, specs.size());
     Assert.assertNull(specs.get(0).getSpec());
+
+    Map<String, SupervisorSpec> latestSupervisorSpec = supervisorManager.getLatest();
+    Assert.assertEquals(1, latestSupervisorSpec.size());
   }
 
   @Test

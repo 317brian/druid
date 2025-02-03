@@ -19,15 +19,19 @@
 
 package org.apache.druid.math.expr;
 
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.guava.Comparators;
 import org.apache.druid.math.expr.vector.ExprVectorProcessor;
 import org.apache.druid.math.expr.vector.VectorComparisonProcessors;
 import org.apache.druid.math.expr.vector.VectorProcessors;
-import org.apache.druid.segment.column.Types;
 
 import javax.annotation.Nullable;
 import java.util.Objects;
+
+@SuppressWarnings("unused")
+final class BinaryLogicalOperatorExpr
+{
+  // phony class to enable maven to track the compilation of this class
+}
 
 // logical operators live here
 @SuppressWarnings("ClassName")
@@ -51,6 +55,14 @@ class BinLtExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) < 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left < right;
@@ -64,15 +76,9 @@ class BinLtExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.lessThan(inspector, left, right);
+    return VectorComparisonProcessors.lessThan().asProcessor(inspector, left, right);
   }
 }
 
@@ -97,6 +103,14 @@ class BinLeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) <= 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left <= right;
@@ -110,15 +124,9 @@ class BinLeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.lessThanOrEqual(inspector, left, right);
+    return VectorComparisonProcessors.lessThanOrEquals().asProcessor(inspector, left, right);
   }
 }
 
@@ -143,6 +151,14 @@ class BinGtExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) > 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left > right;
@@ -156,15 +172,9 @@ class BinGtExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.greaterThan(inspector, left, right);
+    return VectorComparisonProcessors.greaterThan().asProcessor(inspector, left, right);
   }
 }
 
@@ -189,6 +199,14 @@ class BinGeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) >= 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left >= right;
@@ -202,15 +220,9 @@ class BinGeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.greaterThanOrEqual(inspector, left, right);
+    return VectorComparisonProcessors.greaterThanOrEquals().asProcessor(inspector, left, right);
   }
 }
 
@@ -235,6 +247,14 @@ class BinEqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) == 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left == right;
@@ -247,15 +267,9 @@ class BinEqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.equal(inspector, left, right);
+    return VectorComparisonProcessors.equals().asProcessor(inspector, left, right);
   }
 }
 
@@ -280,6 +294,14 @@ class BinNeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
+  protected boolean evalArray(ExprEval left, ExprEval right)
+  {
+    ExpressionType type = ExpressionTypeConversion.leastRestrictiveType(left.type(), right.type());
+    // type cannot be null here because ExprEval type is not nullable
+    return type.getNullableStrategy().compare(left.castTo(type).asArray(), right.castTo(type).asArray()) != 0;
+  }
+
+  @Override
   protected final boolean evalLong(long left, long right)
   {
     return left != right;
@@ -292,15 +314,9 @@ class BinNeqExpr extends BinaryBooleanOpExprBase
   }
 
   @Override
-  public boolean canVectorize(InputBindingInspector inspector)
-  {
-    return inspector.canVectorize(left, right);
-  }
-
-  @Override
   public <T> ExprVectorProcessor<T> asVectorProcessor(VectorInputBindingInspector inspector)
   {
-    return VectorComparisonProcessors.notEqual(inspector, left, right);
+    return VectorComparisonProcessors.notEquals().asProcessor(inspector, left, right);
   }
 }
 
@@ -322,35 +338,26 @@ class BinAndExpr extends BinaryOpExprBase
   public ExprEval eval(ObjectBinding bindings)
   {
     ExprEval leftVal = left.eval(bindings);
-    if (!ExpressionProcessing.useStrictBooleans()) {
-      return leftVal.asBoolean() ? right.eval(bindings) : leftVal;
-    }
 
     // if left is false, always false
     if (leftVal.value() != null && !leftVal.asBoolean()) {
       return ExprEval.ofLongBoolean(false);
     }
     ExprEval rightVal;
-    // null values can (but not always) appear as string typed
-    // so type isn't necessarily string unless value is non-null
-    if (NullHandling.sqlCompatible() || (Types.is(leftVal.type(), ExprType.STRING))) {
-      // true/null, null/true, null/null -> null
-      // false/null, null/false -> false
-      if (leftVal.value() == null) {
-        rightVal = right.eval(bindings);
-        if (rightVal.value() == null || rightVal.asBoolean()) {
-          return ExprEval.ofLong(null);
-        }
-        return ExprEval.ofLongBoolean(false);
-      } else {
-        // left value must be true
-        rightVal = right.eval(bindings);
-        if (rightVal.value() == null) {
-          return ExprEval.ofLong(null);
-        }
-      }
-    } else {
+    // true/null, null/true, null/null -> null
+    // false/null, null/false -> false
+    if (leftVal.value() == null) {
       rightVal = right.eval(bindings);
+      if (rightVal.value() == null || rightVal.asBoolean()) {
+        return ExprEval.ofLong(null);
+      }
+      return ExprEval.ofLongBoolean(false);
+    } else {
+      // left value must be true
+      rightVal = right.eval(bindings);
+      if (rightVal.value() == null) {
+        return ExprEval.ofLong(null);
+      }
     }
     return ExprEval.ofLongBoolean(leftVal.asBoolean() && rightVal.asBoolean());
   }
@@ -358,9 +365,7 @@ class BinAndExpr extends BinaryOpExprBase
   @Override
   public boolean canVectorize(InputBindingInspector inspector)
   {
-    return ExpressionProcessing.useStrictBooleans() &&
-           inspector.areSameTypes(left, right) &&
-           inspector.canVectorize(left, right);
+    return inspector.areSameTypes(left, right) && inspector.canVectorize(left, right);
   }
 
   @Override
@@ -373,9 +378,6 @@ class BinAndExpr extends BinaryOpExprBase
   @Override
   public ExpressionType getOutputType(InputBindingInspector inspector)
   {
-    if (!ExpressionProcessing.useStrictBooleans()) {
-      return super.getOutputType(inspector);
-    }
     return ExpressionType.LONG;
   }
 }
@@ -397,9 +399,6 @@ class BinOrExpr extends BinaryOpExprBase
   public ExprEval eval(ObjectBinding bindings)
   {
     ExprEval leftVal = left.eval(bindings);
-    if (!ExpressionProcessing.useStrictBooleans()) {
-      return leftVal.asBoolean() ? leftVal : right.eval(bindings);
-    }
 
     // if left is true, always true
     if (leftVal.value() != null && leftVal.asBoolean()) {
@@ -407,26 +406,20 @@ class BinOrExpr extends BinaryOpExprBase
     }
 
     final ExprEval rightVal;
-    // null values can (but not always) appear as string typed
-    // so type isn't necessarily string unless value is non-null
-    if (NullHandling.sqlCompatible() || (Types.is(leftVal.type(), ExprType.STRING))) {
-      // true/null, null/true -> true
-      // false/null, null/false, null/null -> null
-      if (leftVal.value() == null) {
-        rightVal = right.eval(bindings);
-        if (rightVal.value() == null || !rightVal.asBoolean()) {
-          return ExprEval.ofLong(null);
-        }
-        return ExprEval.ofLongBoolean(true);
-      } else {
-        // leftval is false
-        rightVal = right.eval(bindings);
-        if (rightVal.value() == null) {
-          return ExprEval.ofLong(null);
-        }
-      }
-    } else {
+    // true/null, null/true -> true
+    // false/null, null/false, null/null -> null
+    if (leftVal.value() == null) {
       rightVal = right.eval(bindings);
+      if (rightVal.value() == null || !rightVal.asBoolean()) {
+        return ExprEval.ofLong(null);
+      }
+      return ExprEval.ofLongBoolean(true);
+    } else {
+      // leftval is false
+      rightVal = right.eval(bindings);
+      if (rightVal.value() == null) {
+        return ExprEval.ofLong(null);
+      }
     }
     return ExprEval.ofLongBoolean(leftVal.asBoolean() || rightVal.asBoolean());
   }
@@ -436,9 +429,7 @@ class BinOrExpr extends BinaryOpExprBase
   public boolean canVectorize(InputBindingInspector inspector)
   {
 
-    return ExpressionProcessing.useStrictBooleans() &&
-           inspector.areSameTypes(left, right) &&
-           inspector.canVectorize(left, right);
+    return inspector.areSameTypes(left, right) && inspector.canVectorize(left, right);
   }
 
   @Override
@@ -451,9 +442,6 @@ class BinOrExpr extends BinaryOpExprBase
   @Override
   public ExpressionType getOutputType(InputBindingInspector inspector)
   {
-    if (!ExpressionProcessing.useStrictBooleans()) {
-      return super.getOutputType(inspector);
-    }
     return ExpressionType.LONG;
   }
 }

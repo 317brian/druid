@@ -53,7 +53,7 @@ public class PrioritizedExecutorService extends AbstractExecutorService implemen
             config.getNumThreads(),
             0L,
             TimeUnit.MILLISECONDS,
-            new PriorityBlockingQueue<Runnable>(),
+            new PriorityBlockingQueue<>(),
             new ThreadFactoryBuilder().setDaemon(true).setNameFormat(config.getFormatString()).build()
         ),
         config
@@ -203,6 +203,14 @@ public class PrioritizedExecutorService extends AbstractExecutorService implemen
   {
     return delegateQueue.size();
   }
+
+  /**
+   * Returns the approximate number of tasks being run by the thread pool currently.
+   */
+  public int getActiveTasks()
+  {
+    return threadPoolExecutor.getActiveCount();
+  }
 }
 
 class PrioritizedListenableFutureTask<V> implements RunnableFuture<V>,
@@ -219,7 +227,7 @@ class PrioritizedListenableFutureTask<V> implements RunnableFuture<V>,
       return Integer.compare(right.getPriority(), left.getPriority());
     }
   }.compound(
-      new Ordering<PrioritizedListenableFutureTask>()
+      new Ordering<>()
       {
         @Override
         public int compare(PrioritizedListenableFutureTask left, PrioritizedListenableFutureTask right)

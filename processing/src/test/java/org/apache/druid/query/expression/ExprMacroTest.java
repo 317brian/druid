@@ -20,14 +20,12 @@
 package org.apache.druid.query.expression;
 
 import com.google.common.collect.ImmutableMap;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.math.expr.Expr;
 import org.apache.druid.math.expr.ExpressionType;
 import org.apache.druid.math.expr.InputBindings;
 import org.apache.druid.math.expr.Parser;
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -37,7 +35,7 @@ public class ExprMacroTest
   private static final String IPV4_STRING = "192.168.0.1";
   private static final long IPV4_LONG = 3232235521L;
   private static final Expr.ObjectBinding BINDINGS = InputBindings.forInputSuppliers(
-      ImmutableMap.<String, InputBindings.InputSupplier>builder()
+      ImmutableMap.<String, InputBindings.InputSupplier<?>>builder()
                   .put("t",
                        InputBindings.inputSupplier(
                            ExpressionType.LONG,
@@ -63,12 +61,6 @@ public class ExprMacroTest
                   .put("ipv4_broadcast", InputBindings.inputSupplier(ExpressionType.STRING, () -> "192.168.255.255"))
                   .build()
   );
-
-  @BeforeClass
-  public static void setUpClass()
-  {
-    NullHandling.initializeForTests();
-  }
 
   @Rule
   public ExpectedException expectedException = ExpectedException.none();
@@ -165,7 +157,7 @@ public class ExprMacroTest
   @Test
   public void testTrim()
   {
-    String emptyString = NullHandling.replaceWithDefault() ? null : "";
+    String emptyString = "";
     assertExpr("trim('')", emptyString);
     assertExpr("trim(concat(' ',x,' '))", "foo");
     assertExpr("trim(spacey)", "hey there");
@@ -178,7 +170,7 @@ public class ExprMacroTest
   @Test
   public void testLTrim()
   {
-    String emptyString = NullHandling.replaceWithDefault() ? null : "";
+    String emptyString = "";
     assertExpr("ltrim('')", emptyString);
     assertExpr("ltrim(concat(' ',x,' '))", "foo ");
     assertExpr("ltrim(spacey)", "hey there  ");
@@ -191,7 +183,7 @@ public class ExprMacroTest
   @Test
   public void testRTrim()
   {
-    String emptyString = NullHandling.replaceWithDefault() ? null : "";
+    String emptyString = "";
     assertExpr("rtrim('')", emptyString);
     assertExpr("rtrim(concat(' ',x,' '))", " foo");
     assertExpr("rtrim(spacey)", "  hey there");

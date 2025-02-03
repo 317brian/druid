@@ -19,17 +19,14 @@
 
 package org.apache.druid.msq.guice;
 
-import com.fasterxml.jackson.databind.Module;
 import com.google.inject.Binder;
 import org.apache.druid.discovery.NodeRole;
 import org.apache.druid.guice.Jerseys;
 import org.apache.druid.guice.LifecycleModule;
 import org.apache.druid.guice.annotations.LoadScope;
 import org.apache.druid.initialization.DruidModule;
-import org.apache.druid.msq.sql.SqlTaskResource;
-
-import java.util.Collections;
-import java.util.List;
+import org.apache.druid.msq.sql.resources.SqlStatementResource;
+import org.apache.druid.msq.sql.resources.SqlTaskResource;
 
 /**
  * Module for adding the {@link SqlTaskResource} endpoint to the Broker.
@@ -43,11 +40,7 @@ public class SqlTaskModule implements DruidModule
     // Force eager initialization.
     LifecycleModule.register(binder, SqlTaskResource.class);
     Jerseys.addResource(binder, SqlTaskResource.class);
-  }
-
-  @Override
-  public List<? extends Module> getJacksonModules()
-  {
-    return Collections.emptyList();
+    LifecycleModule.register(binder, SqlStatementResource.class);
+    Jerseys.addResource(binder, SqlStatementResource.class);
   }
 }

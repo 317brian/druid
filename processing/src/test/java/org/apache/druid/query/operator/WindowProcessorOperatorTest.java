@@ -27,6 +27,9 @@ import org.apache.druid.query.rowsandcols.column.IntArrayColumn;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.Collections;
+import java.util.List;
+
 public class WindowProcessorOperatorTest
 {
   @Test
@@ -53,12 +56,18 @@ public class WindowProcessorOperatorTest
           {
             return true;
           }
+
+          @Override
+          public List<String> getOutputColumnNames()
+          {
+            return Collections.emptyList();
+          }
         },
         InlineScanOperator.make(rac)
     );
 
     new OperatorTestHelper()
-        .withPushFn(
+        .withPushFn(() ->
             rowsAndColumns -> {
               Assert.assertSame(rac, rowsAndColumns);
               return Operator.Signal.GO;

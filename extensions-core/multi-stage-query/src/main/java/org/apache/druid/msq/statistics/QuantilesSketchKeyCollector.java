@@ -23,6 +23,7 @@ import com.google.common.math.LongMath;
 import com.google.common.primitives.Ints;
 import org.apache.datasketches.quantiles.ItemsSketch;
 import org.apache.datasketches.quantiles.ItemsUnion;
+import org.apache.datasketches.quantilescommon.QuantileSearchCriteria;
 import org.apache.druid.frame.key.ClusterByPartition;
 import org.apache.druid.frame.key.ClusterByPartitions;
 import org.apache.druid.frame.key.RowKey;
@@ -37,7 +38,7 @@ import java.util.NoSuchElementException;
 
 /**
  * A key collector that is used when not aggregating. It uses a quantiles sketch to track keys.
- *
+ * <br>
  * The collector maintains the averageKeyLength for all keys added through {@link #add(RowKey, long)} or
  * {@link #addAll(QuantilesSketchKeyCollector)}. The average is calculated as a running average and accounts for
  * weight of the key added. The averageKeyLength is assumed to be unaffected by {@link #downSample()}.
@@ -85,7 +86,9 @@ public class QuantilesSketchKeyCollector implements KeyCollector<QuantilesSketch
     double otherBytesCount = other.averageKeyLength * other.getSketch().getN();
     averageKeyLength = ((sketchBytesCount + otherBytesCount) / (sketch.getN() + other.sketch.getN()));
 
-    union.union(sketch);
+    if (!sketch.isEmpty()) {
+      union.union(sketch);
+    }
     union.union(other.sketch);
     sketch = union.getResultAndReset();
   }
@@ -149,7 +152,7 @@ public class QuantilesSketchKeyCollector implements KeyCollector<QuantilesSketch
 
     final int numPartitions = Ints.checkedCast(LongMath.divide(sketch.getN(), targetWeight, RoundingMode.CEILING));
 
-    final byte[][] quantiles = (sketch.getPartitionBoundaries(numPartitions)).boundaries;
+    final byte[][] quantiles = (sketch.getPartitionBoundaries(numPartitions, QuantileSearchCriteria.EXCLUSIVE)).boundaries;
     final List<ClusterByPartition> partitions = new ArrayList<>();
 
     for (int i = 0; i < numPartitions; i++) {
@@ -171,6 +174,12 @@ public class QuantilesSketchKeyCollector implements KeyCollector<QuantilesSketch
     return new ClusterByPartitions(partitions);
   }
 
+  @Override
+  public int sketchAccuracyFactor()
+  {
+    return sketch.getK();
+  }
+
   /**
    * Retrieves the backing sketch. Exists for usage by {@link QuantilesSketchKeyCollectorFactory}.
    */
@@ -185,5 +194,16 @@ public class QuantilesSketchKeyCollector implements KeyCollector<QuantilesSketch
   double getAverageKeyLength()
   {
     return averageKeyLength;
+  }
+
+  @Override
+  public String toString()
+  {
+    return "QuantilesSketchKeyCollector{" +
+           "sketch=ItemsSketch{N=" + sketch.getN() +
+           ", K=" + sketch.getK() +
+           ", retainedKeys=" + sketch.getNumRetained() +
+           "}, averageKeyLength=" + averageKeyLength +
+           '}';
   }
 }

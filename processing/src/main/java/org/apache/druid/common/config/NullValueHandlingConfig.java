@@ -21,33 +21,42 @@ package org.apache.druid.common.config;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.druid.java.util.common.logger.Logger;
 
 public class NullValueHandlingConfig
 {
+  private static final Logger LOG = new Logger(NullValueHandlingConfig.class);
   public static final String NULL_HANDLING_CONFIG_STRING = "druid.generic.useDefaultValueForNull";
-
-  //added to preserve backward compatibility
-  //and not count nulls during cardinality aggrgation over strings
-
+  public static final String THREE_VALUE_LOGIC_CONFIG_STRING = "druid.generic.useThreeValueLogicForNativeFilters";
   public static final String NULL_HANDLING_DURING_STRING_CARDINALITY = "druid.generic.ignoreNullsForStringCardinality";
 
   @JsonProperty("useDefaultValueForNull")
   private final boolean useDefaultValuesForNull;
 
+  @JsonProperty("useThreeValueLogicForNativeFilters")
+  private final boolean useThreeValueLogicForNativeFilters;
+
   @JsonProperty("ignoreNullsForStringCardinality")
   private final boolean ignoreNullsForStringCardinality;
-
 
   @JsonCreator
   public NullValueHandlingConfig(
       @JsonProperty("useDefaultValueForNull") Boolean useDefaultValuesForNull,
+      @JsonProperty("useThreeValueLogicForNativeFilters") Boolean useThreeValueLogicForNativeFilters,
       @JsonProperty("ignoreNullsForStringCardinality") Boolean ignoreNullsForStringCardinality
   )
   {
     if (useDefaultValuesForNull == null) {
-      this.useDefaultValuesForNull = Boolean.valueOf(System.getProperty(NULL_HANDLING_CONFIG_STRING, "true"));
+      this.useDefaultValuesForNull = Boolean.valueOf(System.getProperty(NULL_HANDLING_CONFIG_STRING, "false"));
     } else {
       this.useDefaultValuesForNull = useDefaultValuesForNull;
+    }
+    if (useThreeValueLogicForNativeFilters == null) {
+      this.useThreeValueLogicForNativeFilters = Boolean.valueOf(
+          System.getProperty(THREE_VALUE_LOGIC_CONFIG_STRING, "true")
+      );
+    } else {
+      this.useThreeValueLogicForNativeFilters = useThreeValueLogicForNativeFilters;
     }
     if (ignoreNullsForStringCardinality == null) {
       this.ignoreNullsForStringCardinality = Boolean.valueOf(System.getProperty(
@@ -61,15 +70,5 @@ public class NullValueHandlingConfig
         this.ignoreNullsForStringCardinality = false;
       }
     }
-  }
-
-  public boolean isIgnoreNullsForStringCardinality()
-  {
-    return ignoreNullsForStringCardinality;
-  }
-
-  public boolean isUseDefaultValuesForNull()
-  {
-    return useDefaultValuesForNull;
   }
 }

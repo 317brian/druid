@@ -33,7 +33,8 @@ import './ingestion-progress-dialog.scss';
 interface IngestionProgressDialogProps {
   taskId: string;
   goToQuery(queryWithContext: QueryWithContext): void;
-  goToIngestion(taskId: string): void;
+  goToTask(taskGroupId: string): void;
+  goToTaskGroup(taskGroupId: string): void;
   onReset(): void;
   onClose(): void;
 }
@@ -41,7 +42,7 @@ interface IngestionProgressDialogProps {
 export const IngestionProgressDialog = React.memo(function IngestionProgressDialog(
   props: IngestionProgressDialogProps,
 ) {
-  const { taskId, goToQuery, goToIngestion, onReset, onClose } = props;
+  const { taskId, goToQuery, goToTask, goToTaskGroup, onReset, onClose } = props;
   const [showLiveReports, setShowLiveReports] = useState(false);
 
   const [insertResultState, ingestQueryManager] = useQueryManager<string, Execution, Execution>({
@@ -78,10 +79,7 @@ export const IngestionProgressDialog = React.memo(function IngestionProgressDial
               showLiveReports={showLiveReports}
             />
             {insertResultState.intermediate?.stages && showLiveReports && (
-              <ExecutionStagesPane
-                execution={insertResultState.intermediate}
-                goToIngestion={goToIngestion}
-              />
+              <ExecutionStagesPane execution={insertResultState.intermediate} goToTask={goToTask} />
             )}
           </>
         )}
@@ -107,7 +105,7 @@ export const IngestionProgressDialog = React.memo(function IngestionProgressDial
                 rightIcon={IconNames.ARROW_TOP_RIGHT}
                 onClick={() => {
                   if (!insertResultState.intermediate) return;
-                  goToIngestion(insertResultState.intermediate.id);
+                  goToTaskGroup(insertResultState.intermediate.id);
                 }}
               />
             </>

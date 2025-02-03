@@ -74,7 +74,7 @@ import java.util.concurrent.TimeoutException;
 public class CacheSchedulerTest
 {
   public static final Function<Lifecycle, NamespaceExtractionCacheManager> CREATE_ON_HEAP_CACHE_MANAGER =
-      new Function<Lifecycle, NamespaceExtractionCacheManager>()
+      new Function<>()
       {
         @Nullable
         @Override
@@ -88,7 +88,7 @@ public class CacheSchedulerTest
         }
       };
   public static final Function<Lifecycle, NamespaceExtractionCacheManager> CREATE_OFF_HEAP_CACHE_MANAGER =
-      new Function<Lifecycle, NamespaceExtractionCacheManager>()
+      new Function<>()
       {
         @Nullable
         @Override
@@ -188,6 +188,24 @@ public class CacheSchedulerTest
     );
     CacheScheduler.Entry entry = scheduler.schedule(namespace);
     waitFor(entry);
+    Assert.assertEquals(VALUE, entry.getCache().get(KEY));
+  }
+
+  @Test(timeout = 60_000L)
+  public void testInitialization() throws InterruptedException, TimeoutException
+  {
+    UriExtractionNamespace namespace = new UriExtractionNamespace(
+        tmpFile.toURI(),
+        null, null,
+        new UriExtractionNamespace.ObjectMapperFlatDataParser(
+            UriExtractionNamespaceTest.registerTypes(new ObjectMapper())
+        ),
+        new Period(0),
+        null,
+        null
+    );
+    CacheScheduler.Entry entry = scheduler.schedule(namespace);
+    entry.awaitTotalUpdatesWithTimeout(1, 2000);
     Assert.assertEquals(VALUE, entry.getCache().get(KEY));
   }
 
@@ -457,6 +475,8 @@ public class CacheSchedulerTest
         "time",
         "some filter",
         new Period(10_000),
+        null,
+        0,
         null,
         new JdbcAccessSecurityConfig()
         {

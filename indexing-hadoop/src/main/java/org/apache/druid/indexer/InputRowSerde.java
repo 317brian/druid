@@ -19,7 +19,6 @@
 
 package org.apache.druid.indexer;
 
-import com.google.common.base.Supplier;
 import com.google.common.collect.Lists;
 import com.google.common.io.ByteArrayDataInput;
 import com.google.common.io.ByteArrayDataOutput;
@@ -68,29 +67,21 @@ public class InputRowSerde
   private static <T extends Number> void writeNullableNumeric(
       T ret,
       final ByteArrayDataOutput out,
-      final Supplier<T> getDefault,
       final Consumer<T> write)
   {
-    if (ret == null) {
-      ret = getDefault.get();
-    }
-
-    // Write the null byte only if the default numeric value is still null.
     if (ret == null) {
       out.writeByte(NullHandling.IS_NULL_BYTE);
       return;
     }
 
-    if (NullHandling.sqlCompatible()) {
-      out.writeByte(NullHandling.IS_NOT_NULL_BYTE);
-    }
+    out.writeByte(NullHandling.IS_NOT_NULL_BYTE);
 
     write.accept(ret);
   }
 
   private static boolean isNullByteSet(final ByteArrayDataInput in)
   {
-    return NullHandling.sqlCompatible() && in.readByte() == NullHandling.IS_NULL_BYTE;
+    return in.readByte() == NullHandling.IS_NULL_BYTE;
   }
 
   public interface IndexSerdeTypeHelper<T>
@@ -205,7 +196,7 @@ public class InputRowSerde
         exceptionToThrow = pe;
       }
 
-      writeNullableNumeric(ret, out, NullHandling::defaultLongValue, out::writeLong);
+      writeNullableNumeric(ret, out, out::writeLong);
 
       if (exceptionToThrow != null) {
         throw exceptionToThrow;
@@ -240,7 +231,7 @@ public class InputRowSerde
         exceptionToThrow = pe;
       }
 
-      writeNullableNumeric(ret, out, NullHandling::defaultFloatValue, out::writeFloat);
+      writeNullableNumeric(ret, out, out::writeFloat);
 
       if (exceptionToThrow != null) {
         throw exceptionToThrow;
@@ -275,7 +266,7 @@ public class InputRowSerde
         exceptionToThrow = pe;
       }
 
-      writeNullableNumeric(ret, out, NullHandling::defaultDoubleValue, out::writeDouble);
+      writeNullableNumeric(ret, out, out::writeDouble);
 
       if (exceptionToThrow != null) {
         throw exceptionToThrow;
@@ -293,7 +284,7 @@ public class InputRowSerde
   public static SerializeResult toBytes(
       final Map<String, IndexSerdeTypeHelper> typeHelperMap,
       final InputRow row,
-      AggregatorFactory[] aggs
+      final AggregatorFactory[] aggs
   )
   {
     try {
@@ -323,14 +314,15 @@ public class InputRowSerde
       }
 
       //writing all metrics
-      Supplier<InputRow> supplier = () -> row;
       WritableUtils.writeVInt(out, aggs.length);
       for (AggregatorFactory aggFactory : aggs) {
         String k = aggFactory.getName();
         writeString(k, out);
 
+        final IncrementalIndex.InputRowHolder holder = new IncrementalIndex.InputRowHolder();
+        holder.set(row);
         try (Aggregator agg = aggFactory.factorize(
-            IncrementalIndex.makeColumnSelectorFactory(VirtualColumns.EMPTY, aggFactory, supplier, true)
+            IncrementalIndex.makeColumnSelectorFactory(VirtualColumns.EMPTY, holder, aggFactory)
         )) {
           try {
             agg.aggregate();

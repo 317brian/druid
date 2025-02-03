@@ -30,6 +30,7 @@ import org.apache.druid.segment.column.ColumnCapabilities;
 import org.apache.druid.segment.column.ColumnCapabilitiesImpl;
 import org.apache.druid.segment.column.ColumnFormat;
 import org.apache.druid.segment.column.ColumnType;
+import org.apache.druid.segment.column.StringUtf8DictionaryEncodedColumn;
 import org.apache.druid.segment.data.Indexed;
 import org.apache.druid.segment.serde.NestedCommonFormatColumnPartSerde;
 
@@ -45,8 +46,7 @@ import java.util.TreeMap;
  *
  * @see ScalarDoubleColumn
  * @see ScalarLongColumn
- * @see ScalarStringDictionaryEncodedColumn
- * @see org.apache.druid.segment.column.StringFrontCodedDictionaryEncodedColumn
+ * @see StringUtf8DictionaryEncodedColumn
  * @see VariantColumn
  * @see CompressedNestedDataComplexColumn
  */
@@ -75,9 +75,11 @@ public interface NestedCommonFormatColumn extends BaseColumn
 
   default SortedMap<String, FieldTypeInfo.MutableTypeSet> getFieldTypeInfo()
   {
-    FieldTypeInfo.MutableTypeSet rootOnlyType = new FieldTypeInfo.MutableTypeSet().add(getLogicalType());
     SortedMap<String, FieldTypeInfo.MutableTypeSet> fields = new TreeMap<>();
-    fields.put(NestedPathFinder.JSON_PATH_ROOT, rootOnlyType);
+    if (!ColumnType.NESTED_DATA.equals(getLogicalType())) {
+      FieldTypeInfo.MutableTypeSet rootOnlyType = new FieldTypeInfo.MutableTypeSet().add(getLogicalType());
+      fields.put(NestedPathFinder.JSON_PATH_ROOT, rootOnlyType);
+    }
     return fields;
   }
 
@@ -87,11 +89,13 @@ public interface NestedCommonFormatColumn extends BaseColumn
   {
     private final ColumnType logicalType;
     private final boolean hasNulls;
+    private final boolean enforceLogicalType;
 
-    public Format(ColumnType logicalType, boolean hasNulls)
+    public Format(ColumnType logicalType, boolean hasNulls, boolean enforceLogicalType)
     {
       this.logicalType = logicalType;
       this.hasNulls = hasNulls;
+      this.enforceLogicalType = enforceLogicalType;
     }
 
     @Override
@@ -103,13 +107,13 @@ public interface NestedCommonFormatColumn extends BaseColumn
     @Override
     public DimensionHandler getColumnHandler(String columnName)
     {
-      return new NestedCommonFormatColumnHandler(columnName);
+      return new NestedCommonFormatColumnHandler(columnName, enforceLogicalType ? logicalType : null);
     }
 
     @Override
     public DimensionSchema getColumnSchema(String columnName)
     {
-      return new AutoTypeColumnSchema(columnName);
+      return new AutoTypeColumnSchema(columnName, enforceLogicalType ? logicalType : null);
     }
 
     @Override
@@ -120,11 +124,11 @@ public interface NestedCommonFormatColumn extends BaseColumn
       }
 
       if (otherFormat instanceof Format) {
-        final boolean otherHasNulls = ((Format) otherFormat).hasNulls;
-        if (!getLogicalType().equals(otherFormat.getLogicalType())) {
-          return new Format(ColumnType.NESTED_DATA, hasNulls || otherHasNulls);
+        final Format other = (Format) otherFormat;
+        if (!getLogicalType().equals(other.getLogicalType())) {
+          return new Format(ColumnType.NESTED_DATA, hasNulls || other.hasNulls, false);
         }
-        return new Format(logicalType, hasNulls || otherHasNulls);
+        return new Format(logicalType, hasNulls || other.hasNulls, enforceLogicalType || other.enforceLogicalType);
       }
       throw new ISE(
           "Cannot merge columns of type[%s] and format[%s] and with [%s] and [%s]",
@@ -145,10 +149,9 @@ public interface NestedCommonFormatColumn extends BaseColumn
                                      .setDictionaryValuesSorted(true)
                                      .setDictionaryValuesUnique(true)
                                      .setHasBitmapIndexes(true)
-                                     .setFilterable(true)
                                      .setHasNulls(hasNulls);
       }
-      return ColumnCapabilitiesImpl.createDefault().setType(logicalType).setHasNulls(hasNulls).setFilterable(true);
+      return ColumnCapabilitiesImpl.createDefault().setType(logicalType).setHasNulls(hasNulls);
     }
   }
 }

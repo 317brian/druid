@@ -74,7 +74,7 @@ public class SpecificSegmentQueryRunner<T> implements QueryRunner<T>
 
     final Thread currThread = setName ? Thread.currentThread() : null;
     final String currThreadName = setName ? currThread.getName() : null;
-    final String newName = setName ? query.getType() + "_" + query.getDataSource() + "_" + query.getIntervals() : null;
+    final String newName = setName ? "processing_" + query.getId() : null;
 
     final Sequence<T> baseSequence;
 
@@ -89,7 +89,7 @@ public class SpecificSegmentQueryRunner<T> implements QueryRunner<T>
       baseSequence = base.run(queryPlus, responseContext);
     }
 
-    Sequence<T> segmentMissingCatchingSequence = new Sequence<T>()
+    Sequence<T> segmentMissingCatchingSequence = new Sequence<>()
     {
       @Override
       public <OutType> OutType accumulate(final OutType initValue, final Accumulator<OutType, T> accumulator)
@@ -120,7 +120,7 @@ public class SpecificSegmentQueryRunner<T> implements QueryRunner<T>
 
       private <OutType> Yielder<OutType> makeYielder(final Yielder<OutType> yielder)
       {
-        return new Yielder<OutType>()
+        return new Yielder<>()
         {
           @Override
           public OutType get()

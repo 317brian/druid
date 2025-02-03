@@ -23,10 +23,13 @@ import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexExecutor;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.druid.error.InvalidSqlInput;
 import org.apache.druid.java.util.common.DateTimes;
+import org.apache.druid.math.expr.Evals;
 import org.apache.druid.math.expr.Expr;
 import org.apache.druid.math.expr.ExprEval;
 import org.apache.druid.math.expr.ExprType;
+import org.apache.druid.math.expr.ExpressionType;
 import org.apache.druid.math.expr.InputBindings;
 import org.apache.druid.math.expr.Parser;
 import org.apache.druid.segment.column.RowSignature;
@@ -81,35 +84,47 @@ public class DruidRexExecutor implements RexExecutor
         final RexNode literal;
 
         if (sqlTypeName == SqlTypeName.BOOLEAN) {
-          literal = rexBuilder.makeLiteral(exprResult.asBoolean(), constExp.getType(), true);
+          if (exprResult.valueOrDefault() == null) {
+            literal = rexBuilder.makeNullLiteral(constExp.getType());
+          } else {
+            literal = rexBuilder.makeLiteral(exprResult.asBoolean(), constExp.getType(), true);
+          }
         } else if (sqlTypeName == SqlTypeName.DATE) {
-          // It is possible for an expression to have a non-null String value but it can return null when parsed
-          // as a primitive long/float/double.
-          // ExprEval.isNumericNull checks whether the parsed primitive value is null or not.
-          if (!constExp.getType().isNullable() && exprResult.isNumericNull()) {
-            throw new UnsupportedSQLQueryException("Illegal DATE constant: %s", constExp);
+          if (exprResult.isNumericNull()) {
+            if (constExp.getType().isNullable()) {
+              literal = rexBuilder.makeNullLiteral(constExp.getType());
+            } else {
+              // There can be implicit casts of VARCHAR to TIMESTAMP where the VARCHAR is an invalid timestamp, but the
+              // TIMESTAMP type is not nullable. In this case it's best to throw an error, since it likely means the
+              // user's SQL query contains an invalid literal.
+              throw InvalidSqlInput.exception("Illegal DATE constant [%s]", constExp);
+            }
+          } else {
+            literal = rexBuilder.makeDateLiteral(
+                Calcites.jodaToCalciteDateString(
+                    DateTimes.utc(exprResult.asLong()),
+                    plannerContext.getTimeZone()
+                )
+            );
           }
-
-          literal = rexBuilder.makeDateLiteral(
-              Calcites.jodaToCalciteDateString(
-                  DateTimes.utc(exprResult.asLong()),
-                  plannerContext.getTimeZone()
-              )
-          );
         } else if (sqlTypeName == SqlTypeName.TIMESTAMP) {
-          // It is possible for an expression to have a non-null String value but it can return null when parsed
-          // as a primitive long/float/double.
-          // ExprEval.isNumericNull checks whether the parsed primitive value is null or not.
-          if (!constExp.getType().isNullable() && exprResult.isNumericNull()) {
-            throw new UnsupportedSQLQueryException("Illegal TIMESTAMP constant: %s", constExp);
+          if (exprResult.isNumericNull()) {
+            if (constExp.getType().isNullable()) {
+              literal = rexBuilder.makeNullLiteral(constExp.getType());
+            } else {
+              // There can be implicit casts of VARCHAR to TIMESTAMP where the VARCHAR is an invalid timestamp, but the
+              // TIMESTAMP type is not nullable. In this case it's best to throw an error, since it likely means the
+              // user's SQL query contains an invalid literal.
+              throw InvalidSqlInput.exception("Illegal TIMESTAMP constant [%s]", constExp);
+            }
+          } else {
+            literal = Calcites.jodaToCalciteTimestampLiteral(
+                rexBuilder,
+                DateTimes.utc(exprResult.asLong()),
+                plannerContext.getTimeZone(),
+                constExp.getType().getPrecision()
+            );
           }
-
-          literal = Calcites.jodaToCalciteTimestampLiteral(
-              rexBuilder,
-              DateTimes.utc(exprResult.asLong()),
-              plannerContext.getTimeZone(),
-              constExp.getType().getPrecision()
-          );
         } else if (SqlTypeName.NUMERIC_TYPES.contains(sqlTypeName)) {
           final BigDecimal bigDecimal;
 
@@ -125,12 +140,12 @@ public class DruidRexExecutor implements RexExecutor
               // the query can execute.
               double exprResultDouble = exprResult.asDouble();
               if (Double.isNaN(exprResultDouble) || Double.isInfinite(exprResultDouble)) {
-                String expression = druidExpression.getExpression();
-                throw new UnsupportedSQLQueryException("'%s' evaluates to '%s' that is not supported in SQL. You can either cast the expression as BIGINT ('CAST(%s as BIGINT)') or VARCHAR ('CAST(%s as VARCHAR)') or change the expression itself",
-                    expression,
-                    Double.toString(exprResultDouble),
-                    expression,
-                    expression);
+                throw InvalidSqlInput.exception(
+                        "Expression [%s] evaluates to an unsupported value [%s], expected something that"
+                        + " can be a Double.  Consider casting with 'CAST(<col> AS BIGINT)'",
+                        druidExpression.getExpression(),
+                        exprResultDouble
+                    );
               }
               bigDecimal = BigDecimal.valueOf(exprResult.asDouble());
             }
@@ -144,7 +159,7 @@ public class DruidRexExecutor implements RexExecutor
           } else if (SqlTypeName.NUMERIC_TYPES.contains(constExp.getType().getComponentType().getSqlTypeName())) {
             if (exprResult.type().getElementType().is(ExprType.LONG)) {
               List<BigDecimal> resultAsBigDecimalList = new ArrayList<>(array.length);
-              for (Object val : array) {
+              for (Object val : exprResult.castTo(ExpressionType.LONG_ARRAY).asArray()) {
                 final Number longVal = (Number) val;
                 if (longVal == null) {
                   resultAsBigDecimalList.add(null);
@@ -155,23 +170,36 @@ public class DruidRexExecutor implements RexExecutor
               literal = rexBuilder.makeLiteral(resultAsBigDecimalList, constExp.getType(), true);
             } else {
               List<BigDecimal> resultAsBigDecimalList = new ArrayList<>(array.length);
-              for (Object val : array) {
+              for (Object val : exprResult.castTo(ExpressionType.fromColumnType(druidExpression.getDruidType())).asArray()) {
                 final Number doubleVal = (Number) val;
                 if (doubleVal == null) {
                   resultAsBigDecimalList.add(null);
                 } else if (Double.isNaN(doubleVal.doubleValue()) || Double.isInfinite(doubleVal.doubleValue())) {
-                  String expression = druidExpression.getExpression();
-                  throw new UnsupportedSQLQueryException(
-                      "'%s' contains an element that evaluates to '%s' which is not supported in SQL. You can either cast the element in the ARRAY to BIGINT or VARCHAR or change the expression itself",
-                      expression,
-                      Double.toString(doubleVal.doubleValue())
-                  );
+                  throw InvalidSqlInput.exception(
+                          "Expression [%s] was expected to generate values that are all Doubles,"
+                          + " but entry at index[%d] was not: [%s]."
+                          + "  Consider Casting values to ensure a consistent type.",
+                          druidExpression.getExpression(),
+                          resultAsBigDecimalList.size(),
+                          doubleVal
+                      );
                 } else {
                   resultAsBigDecimalList.add(BigDecimal.valueOf(doubleVal.doubleValue()));
                 }
               }
               literal = rexBuilder.makeLiteral(resultAsBigDecimalList, constExp.getType(), true);
             }
+          } else if (constExp.getType().getComponentType().getSqlTypeName() == SqlTypeName.BOOLEAN) {
+            List<Boolean> resultAsBooleanList = new ArrayList<>(array.length);
+            for (Object val : exprResult.castTo(ExpressionType.LONG_ARRAY).asArray()) {
+              final Number longVal = (Number) val;
+              if (longVal == null) {
+                resultAsBooleanList.add(null);
+              } else {
+                resultAsBooleanList.add(Evals.asBoolean(longVal.longValue()));
+              }
+            }
+            literal = rexBuilder.makeLiteral(resultAsBooleanList, constExp.getType(), true);
           } else {
             literal = rexBuilder.makeLiteral(Arrays.asList(array), constExp.getType(), true);
           }

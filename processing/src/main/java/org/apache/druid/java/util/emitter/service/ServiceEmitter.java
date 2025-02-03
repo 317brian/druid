@@ -47,8 +47,8 @@ public class ServiceEmitter implements Emitter
   {
     this.serviceDimensions = ImmutableMap
         .<String, String>builder()
-        .put("service", Preconditions.checkNotNull(service))
-        .put("host", Preconditions.checkNotNull(host))
+        .put("service", Preconditions.checkNotNull(service, "service should be non-null"))
+        .put("host", Preconditions.checkNotNull(host, "host should be non-null"))
         .putAll(otherServiceDimensions)
         .build();
     this.emitter = emitter;
@@ -67,7 +67,7 @@ public class ServiceEmitter implements Emitter
     emitter.emit(event);
   }
 
-  public void emit(ServiceEventBuilder builder)
+  public <E extends Event> void emit(ServiceEventBuilder<E> builder)
   {
     emit(builder.build(serviceDimensions));
   }

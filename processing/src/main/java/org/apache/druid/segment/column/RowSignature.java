@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableList;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import org.apache.druid.java.util.common.IAE;
+import org.apache.druid.query.InlineDataSource;
 import org.apache.druid.query.aggregation.AggregatorFactory;
 import org.apache.druid.query.aggregation.PostAggregator;
 import org.apache.druid.query.dimension.DimensionSpec;
@@ -44,7 +45,7 @@ import java.util.Optional;
  * Type signature for a row in a Druid datasource or query result.
  *
  * @see org.apache.druid.query.QueryToolChest#resultArraySignature which returns signatures for query results
- * @see org.apache.druid.query.InlineDataSource#getRowSignature which returns signatures for inline datasources
+ * @see InlineDataSource#getRowSignature which returns signatures for inline datasources
  */
 public class RowSignature implements ColumnInspector
 {
@@ -390,5 +391,35 @@ public class RowSignature implements ColumnInspector
      * Aggregation results may or may not be finalized.
      */
     UNKNOWN
+  }
+
+  /**
+   * Builds a safe {@link RowSignature}.
+   *
+   * The new rowsignature will not contain `null` types - they will be replaced by STRING.
+   */
+  public RowSignature buildSafeSignature(ImmutableList<String> requestedColumnNames)
+  {
+    Builder builder = new Builder();
+    for (String columnName : requestedColumnNames) {
+      ColumnType columnType = columnTypes.get(columnName);
+      if (columnType == null) {
+        columnType = ColumnType.STRING;
+      }
+      builder.add(columnName, columnType);
+    }
+    return builder.build();
+  }
+
+  /**
+   * Returns the column types in the order they are in.
+   */
+  public List<ColumnType> getColumnTypes()
+  {
+    List<ColumnType> ret = new ArrayList<>();
+    for (String colName : columnNames) {
+      ret.add(columnTypes.get(colName));
+    }
+    return ret;
   }
 }

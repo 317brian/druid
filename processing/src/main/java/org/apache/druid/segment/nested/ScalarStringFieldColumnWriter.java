@@ -19,7 +19,6 @@
 
 package org.apache.druid.segment.nested;
 
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.java.util.common.io.smoosh.FileSmoosher;
 import org.apache.druid.segment.IndexSpec;
 import org.apache.druid.segment.writeout.SegmentWriteOutMedium;
@@ -28,8 +27,7 @@ import java.io.IOException;
 import java.nio.channels.WritableByteChannel;
 
 /**
- * Nested field writer for string type columns of {@link NestedDataColumnSerializerV4} and
- * {@link NestedDataColumnSerializer}
+ * Nested field writer for string type columns of {@link NestedDataColumnSerializer}
  */
 public final class ScalarStringFieldColumnWriter extends GlobalDictionaryEncodedFieldColumnWriter<String>
 {
@@ -50,7 +48,7 @@ public final class ScalarStringFieldColumnWriter extends GlobalDictionaryEncoded
     if (value == null) {
       return null;
     }
-    return NullHandling.emptyToNullIfNeeded(String.valueOf(value));
+    return String.valueOf(value);
   }
 
   @Override

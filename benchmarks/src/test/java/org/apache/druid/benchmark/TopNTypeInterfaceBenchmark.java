@@ -22,7 +22,6 @@ package org.apache.druid.benchmark;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.druid.benchmark.query.QueryBenchmarkUtil;
 import org.apache.druid.collections.StupidPool;
-import org.apache.druid.common.config.NullHandling;
 import org.apache.druid.data.input.InputRow;
 import org.apache.druid.jackson.DefaultObjectMapper;
 import org.apache.druid.java.util.common.FileUtils;
@@ -101,10 +100,6 @@ import java.util.concurrent.TimeUnit;
 @Measurement(iterations = 25)
 public class TopNTypeInterfaceBenchmark
 {
-  static {
-    NullHandling.initializeForTests();
-  }
-
   private static final SegmentId Q_INDEX_SEGMENT_ID = SegmentId.dummy("qIndex");
   
   @Param({"1"})
@@ -138,11 +133,6 @@ public class TopNTypeInterfaceBenchmark
         JSON_MAPPER,
         new ColumnConfig()
         {
-          @Override
-          public int columnCacheSizeBytes()
-          {
-            return 0;
-          }
         }
     );
     INDEX_MERGER_V9 = new IndexMergerV9(JSON_MAPPER, INDEX_IO, OffHeapMemorySegmentWriteOutMediumFactory.instance());

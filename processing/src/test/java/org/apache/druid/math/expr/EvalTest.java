@@ -22,7 +22,7 @@ package org.apache.druid.math.expr;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import junitparams.converters.Nullable;
-import org.apache.druid.common.config.NullHandling;
+import org.apache.druid.collections.SerializablePair;
 import org.apache.druid.java.util.common.IAE;
 import org.apache.druid.java.util.common.StringUtils;
 import org.apache.druid.segment.column.TypeStrategies;
@@ -83,63 +83,50 @@ public class EvalTest extends InitializedNullHandlingTest
     assertEquals(2.0, evalDouble("\"x\"", bindings), 0.0001);
     assertEquals(304.0, evalDouble("300 + \"x\" * 2", bindings), 0.0001);
 
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(false);
-      Assert.assertFalse(evalDouble("1.0 && 0.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("1.0 && 2.0", bindings) > 0.0);
+    Assert.assertEquals(0L, evalLong("1.0 && 0.0", bindings));
+    Assert.assertEquals(1L, evalLong("1.0 && 2.0", bindings));
 
-      Assert.assertTrue(evalDouble("1.0 || 0.0", bindings) > 0.0);
-      Assert.assertFalse(evalDouble("0.0 || 0.0", bindings) > 0.0);
+    Assert.assertEquals(1L, evalLong("1.0 || 0.0", bindings));
+    Assert.assertEquals(0L, evalLong("0.0 || 0.0", bindings));
 
-      Assert.assertTrue(evalDouble("2.0 > 1.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("2.0 >= 2.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("1.0 < 2.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("2.0 <= 2.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("2.0 == 2.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("2.0 != 1.0", bindings) > 0.0);
+    Assert.assertEquals(1L, evalLong("2.0 > 1.0", bindings));
+    Assert.assertEquals(1L, evalLong("2.0 >= 2.0", bindings));
+    Assert.assertEquals(1L, evalLong("1.0 < 2.0", bindings));
+    Assert.assertEquals(1L, evalLong("2.0 <= 2.0", bindings));
+    Assert.assertEquals(1L, evalLong("2.0 == 2.0", bindings));
+    Assert.assertEquals(1L, evalLong("2.0 != 1.0", bindings));
 
-      Assert.assertTrue(evalDouble("!-1.0", bindings) > 0.0);
-      Assert.assertTrue(evalDouble("!0.0", bindings) > 0.0);
-      Assert.assertFalse(evalDouble("!2.0", bindings) > 0.0);
-    }
-    finally {
-      ExpressionProcessing.initializeForTests();
-    }
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(true);
-      Assert.assertEquals(0L, evalLong("1.0 && 0.0", bindings));
-      Assert.assertEquals(1L, evalLong("1.0 && 2.0", bindings));
+    Assert.assertEquals(1L, evalLong("notdistinctfrom(2.0, 2.0)", bindings));
+    Assert.assertEquals(1L, evalLong("isdistinctfrom(2.0, 1.0)", bindings));
+    Assert.assertEquals(0L, evalLong("notdistinctfrom(2.0, 1.0)", bindings));
+    Assert.assertEquals(0L, evalLong("isdistinctfrom(2.0, 2.0)", bindings));
 
-      Assert.assertEquals(1L, evalLong("1.0 || 0.0", bindings));
-      Assert.assertEquals(0L, evalLong("0.0 || 0.0", bindings));
+    Assert.assertEquals(0L, evalLong("istrue(0.0)", bindings));
+    Assert.assertEquals(1L, evalLong("isfalse(0.0)", bindings));
+    Assert.assertEquals(1L, evalLong("nottrue(0.0)", bindings));
+    Assert.assertEquals(0L, evalLong("notfalse(0.0)", bindings));
 
-      Assert.assertEquals(1L, evalLong("2.0 > 1.0", bindings));
-      Assert.assertEquals(1L, evalLong("2.0 >= 2.0", bindings));
-      Assert.assertEquals(1L, evalLong("1.0 < 2.0", bindings));
-      Assert.assertEquals(1L, evalLong("2.0 <= 2.0", bindings));
-      Assert.assertEquals(1L, evalLong("2.0 == 2.0", bindings));
-      Assert.assertEquals(1L, evalLong("2.0 != 1.0", bindings));
+    Assert.assertEquals(1L, evalLong("istrue(1.0)", bindings));
+    Assert.assertEquals(0L, evalLong("isfalse(1.0)", bindings));
+    Assert.assertEquals(0L, evalLong("nottrue(1.0)", bindings));
+    Assert.assertEquals(1L, evalLong("notfalse(1.0)", bindings));
 
-      Assert.assertEquals(1L, evalLong("!-1.0", bindings));
-      Assert.assertEquals(1L, evalLong("!0.0", bindings));
-      Assert.assertEquals(0L, evalLong("!2.0", bindings));
+    Assert.assertEquals(1L, evalLong("!-1.0", bindings));
+    Assert.assertEquals(1L, evalLong("!0.0", bindings));
+    Assert.assertEquals(0L, evalLong("!2.0", bindings));
 
-      assertEquals(3.5, evalDouble("2.0 + 1.5", bindings), 0.0001);
-      assertEquals(0.5, evalDouble("2.0 - 1.5", bindings), 0.0001);
-      assertEquals(3.0, evalDouble("2.0 * 1.5", bindings), 0.0001);
-      assertEquals(4.0, evalDouble("2.0 / 0.5", bindings), 0.0001);
-      assertEquals(0.2, evalDouble("2.0 % 0.3", bindings), 0.0001);
-      assertEquals(8.0, evalDouble("2.0 ^ 3.0", bindings), 0.0001);
-      assertEquals(-1.5, evalDouble("-1.5", bindings), 0.0001);
+    assertEquals(3.5, evalDouble("2.0 + 1.5", bindings), 0.0001);
+    assertEquals(0.5, evalDouble("2.0 - 1.5", bindings), 0.0001);
+    assertEquals(3.0, evalDouble("2.0 * 1.5", bindings), 0.0001);
+    assertEquals(4.0, evalDouble("2.0 / 0.5", bindings), 0.0001);
+    assertEquals(0.2, evalDouble("2.0 % 0.3", bindings), 0.0001);
+    assertEquals(8.0, evalDouble("2.0 ^ 3.0", bindings), 0.0001);
+    assertEquals(-1.5, evalDouble("-1.5", bindings), 0.0001);
 
 
-      assertEquals(2.0, evalDouble("sqrt(4.0)", bindings), 0.0001);
-      assertEquals(2.0, evalDouble("if(1.0, 2.0, 3.0)", bindings), 0.0001);
-      assertEquals(3.0, evalDouble("if(0.0, 2.0, 3.0)", bindings), 0.0001);
-    }
-    finally {
-      ExpressionProcessing.initializeForTests();
-    }
+    assertEquals(2.0, evalDouble("sqrt(4.0)", bindings), 0.0001);
+    assertEquals(2.0, evalDouble("if(1.0, 2.0, 3.0)", bindings), 0.0001);
+    assertEquals(3.0, evalDouble("if(0.0, 2.0, 3.0)", bindings), 0.0001);
   }
 
   @Test
@@ -165,6 +152,8 @@ public class EvalTest extends InitializedNullHandlingTest
     Assert.assertTrue(evalLong("9223372036854775807 <= 9223372036854775807", bindings) > 0);
     Assert.assertTrue(evalLong("9223372036854775807 == 9223372036854775807", bindings) > 0);
     Assert.assertTrue(evalLong("9223372036854775807 != 9223372036854775806", bindings) > 0);
+    Assert.assertTrue(evalLong("notdistinctfrom(9223372036854775807, 9223372036854775807)", bindings) > 0);
+    Assert.assertTrue(evalLong("isdistinctfrom(9223372036854775807, 9223372036854775806)", bindings) > 0);
 
     assertEquals(9223372036854775807L, evalLong("9223372036854775806 + 1", bindings));
     assertEquals(9223372036854775806L, evalLong("9223372036854775807 - 1", bindings));
@@ -194,10 +183,196 @@ public class EvalTest extends InitializedNullHandlingTest
     assertEquals(1271023381L, evalLong("unix_timestamp('2010-04-12T07:03:01+09:00')", bindings));
     assertEquals(1271023381L, evalLong("unix_timestamp('2010-04-12T07:03:01.419+09:00')", bindings));
     assertEquals(
-        NullHandling.replaceWithDefault() ? "NULL" : "",
+        "",
         eval("nvl(if(x == 9223372036854775807, '', 'x'), 'NULL')", bindings).asString()
     );
     assertEquals("x", eval("nvl(if(x == 9223372036854775806, '', 'x'), 'NULL')", bindings).asString());
+  }
+
+  @Test
+  public void testIsNotDistinctFrom()
+  {
+    assertEquals(
+        1L,
+        new Function.IsNotDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new NullLongExpr(),
+                    new NullLongExpr()
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsNotDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new LongExpr(0L),
+                    new NullLongExpr()
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsNotDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new LongExpr(0L),
+                    new LongExpr(0L)
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+  }
+
+  @Test
+  public void testIsDistinctFrom()
+  {
+    assertEquals(
+        0L,
+        new Function.IsDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new NullLongExpr(),
+                    new NullLongExpr()
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new LongExpr(0L),
+                    new NullLongExpr()
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsDistinctFromFunc()
+            .apply(
+                ImmutableList.of(
+                    new LongExpr(0L),
+                    new LongExpr(0L)
+                ),
+                InputBindings.nilBindings()
+            )
+            .value()
+    );
+  }
+
+  @Test
+  public void testIsFalse()
+  {
+    assertEquals(
+        0L,
+        new Function.IsFalseFunc()
+            .apply(ImmutableList.of(new NullLongExpr()), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsFalseFunc()
+            .apply(ImmutableList.of(new LongExpr(0L)), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsFalseFunc()
+            .apply(ImmutableList.of(new LongExpr(1L)), InputBindings.nilBindings())
+            .value()
+    );
+  }
+
+  @Test
+  public void testIsTrue()
+  {
+    assertEquals(
+        0L,
+        new Function.IsTrueFunc()
+            .apply(ImmutableList.of(new NullLongExpr()), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsTrueFunc()
+            .apply(ImmutableList.of(new LongExpr(0L)), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsTrueFunc()
+            .apply(ImmutableList.of(new LongExpr(1L)), InputBindings.nilBindings())
+            .value()
+    );
+  }
+
+  @Test
+  public void testIsNotFalse()
+  {
+    assertEquals(
+        1L,
+        new Function.IsNotFalseFunc()
+            .apply(ImmutableList.of(new NullLongExpr()), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsNotFalseFunc()
+            .apply(ImmutableList.of(new LongExpr(0L)), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsNotFalseFunc()
+            .apply(ImmutableList.of(new LongExpr(1L)), InputBindings.nilBindings())
+            .value()
+    );
+  }
+
+  @Test
+  public void testIsNotTrue()
+  {
+    assertEquals(
+        1L,
+        new Function.IsNotTrueFunc()
+            .apply(ImmutableList.of(new NullLongExpr()), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        1L,
+        new Function.IsNotTrueFunc()
+            .apply(ImmutableList.of(new LongExpr(0L)), InputBindings.nilBindings())
+            .value()
+    );
+
+    assertEquals(
+        0L,
+        new Function.IsNotTrueFunc()
+            .apply(ImmutableList.of(new LongExpr(1L)), InputBindings.nilBindings())
+            .value()
+    );
   }
 
   @Test
@@ -450,10 +625,30 @@ public class EvalTest extends InitializedNullHandlingTest
         ).asArray()
     );
 
-    Assert.assertThrows(IAE.class, () -> ExprEval.ofLong(1234L).castTo(nestedArray));
-    Assert.assertThrows(IAE.class, () -> ExprEval.of("hello").castTo(nestedArray));
-    Assert.assertThrows(IAE.class, () -> ExprEval.ofDouble(1.234).castTo(nestedArray));
-    Assert.assertThrows(IAE.class, () -> ExprEval.ofComplex(ExpressionType.NESTED_DATA, 1234L).castTo(nestedArray));
+    cast = ExprEval.ofLong(1234L).castTo(nestedArray);
+    Assert.assertEquals(nestedArray, cast.type());
+    Assert.assertArrayEquals(
+        new Object[]{1234L},
+        cast.asArray()
+    );
+    cast = ExprEval.of("hello").castTo(nestedArray);
+    Assert.assertEquals(nestedArray, cast.type());
+    Assert.assertArrayEquals(
+        new Object[]{"hello"},
+        cast.asArray()
+    );
+    cast = ExprEval.ofDouble(1.234).castTo(nestedArray);
+    Assert.assertEquals(nestedArray, cast.type());
+    Assert.assertArrayEquals(
+        new Object[]{1.234},
+        cast.asArray()
+    );
+    cast = ExprEval.ofComplex(ExpressionType.NESTED_DATA, 1234L).castTo(nestedArray);
+    Assert.assertArrayEquals(
+        new Object[]{1234L},
+        cast.asArray()
+    );
+    Assert.assertEquals(nestedArray, cast.type());
   }
 
   @Test
@@ -637,55 +832,28 @@ public class EvalTest extends InitializedNullHandlingTest
   @Test
   public void testIsNumericNull()
   {
-    if (NullHandling.sqlCompatible()) {
-      Assert.assertFalse(ExprEval.ofLong(1L).isNumericNull());
-      Assert.assertTrue(ExprEval.ofLong(null).isNumericNull());
+    Assert.assertFalse(ExprEval.ofLong(1L).isNumericNull());
+    Assert.assertTrue(ExprEval.ofLong(null).isNumericNull());
 
-      Assert.assertFalse(ExprEval.ofDouble(1.0).isNumericNull());
-      Assert.assertTrue(ExprEval.ofDouble(null).isNumericNull());
+    Assert.assertFalse(ExprEval.ofDouble(1.0).isNumericNull());
+    Assert.assertTrue(ExprEval.ofDouble(null).isNumericNull());
 
-      Assert.assertTrue(ExprEval.of(null).isNumericNull());
-      Assert.assertTrue(ExprEval.of("one").isNumericNull());
-      Assert.assertFalse(ExprEval.of("1").isNumericNull());
+    Assert.assertTrue(ExprEval.of(null).isNumericNull());
+    Assert.assertTrue(ExprEval.of("one").isNumericNull());
+    Assert.assertFalse(ExprEval.of("1").isNumericNull());
 
-      Assert.assertFalse(ExprEval.ofLongArray(new Long[]{1L}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null, 2L, 3L}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null}).isNumericNull());
+    Assert.assertFalse(ExprEval.ofLongArray(new Long[]{1L}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null, 2L, 3L}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null}).isNumericNull());
 
-      Assert.assertFalse(ExprEval.ofDoubleArray(new Double[]{1.1}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null, 1.1, 2.2}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null}).isNumericNull());
+    Assert.assertFalse(ExprEval.ofDoubleArray(new Double[]{1.1}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null, 1.1, 2.2}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null}).isNumericNull());
 
-      Assert.assertFalse(ExprEval.ofStringArray(new String[]{"1"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{null, "1", "2"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{"one"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{null}).isNumericNull());
-    } else {
-      Assert.assertFalse(ExprEval.ofLong(1L).isNumericNull());
-      Assert.assertFalse(ExprEval.ofLong(null).isNumericNull());
-
-      Assert.assertFalse(ExprEval.ofDouble(1.0).isNumericNull());
-      Assert.assertFalse(ExprEval.ofDouble(null).isNumericNull());
-
-      // strings are still null
-      Assert.assertTrue(ExprEval.of(null).isNumericNull());
-      Assert.assertTrue(ExprEval.of("one").isNumericNull());
-      Assert.assertFalse(ExprEval.of("1").isNumericNull());
-
-      // arrays can still have nulls
-      Assert.assertFalse(ExprEval.ofLongArray(new Long[]{1L}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null, 2L, 3L}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofLongArray(new Long[]{null}).isNumericNull());
-
-      Assert.assertFalse(ExprEval.ofDoubleArray(new Double[]{1.1}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null, 1.1, 2.2}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofDoubleArray(new Double[]{null}).isNumericNull());
-
-      Assert.assertFalse(ExprEval.ofStringArray(new String[]{"1"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{null, "1", "2"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{"one"}).isNumericNull());
-      Assert.assertTrue(ExprEval.ofStringArray(new String[]{null}).isNumericNull());
-    }
+    Assert.assertFalse(ExprEval.ofStringArray(new String[]{"1"}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofStringArray(new String[]{null, "1", "2"}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofStringArray(new String[]{"one"}).isNumericNull());
+    Assert.assertTrue(ExprEval.ofStringArray(new String[]{null}).isNumericNull());
   }
 
   @Test
@@ -695,56 +863,29 @@ public class EvalTest extends InitializedNullHandlingTest
         ImmutableMap.of("x", 100L, "y", 100L, "z", 100D, "w", 100D)
     );
 
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(false);
-      ExprEval eval = Parser.parse("x==z", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertTrue(eval.asBoolean());
-      assertEquals(ExpressionType.DOUBLE, eval.type());
+    ExprEval eval = Parser.parse("x==y", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertTrue(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
 
-      eval = Parser.parse("x!=z", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertFalse(eval.asBoolean());
-      assertEquals(ExpressionType.DOUBLE, eval.type());
+    eval = Parser.parse("x!=y", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertFalse(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
 
-      eval = Parser.parse("z==w", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertTrue(eval.asBoolean());
-      assertEquals(ExpressionType.DOUBLE, eval.type());
+    eval = Parser.parse("x==z", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertTrue(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
 
-      eval = Parser.parse("z!=w", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertFalse(eval.asBoolean());
-      assertEquals(ExpressionType.DOUBLE, eval.type());
-    }
-    finally {
-      ExpressionProcessing.initializeForTests();
-    }
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(true);
-      ExprEval eval = Parser.parse("x==y", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertTrue(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
+    eval = Parser.parse("x!=z", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertFalse(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
 
-      eval = Parser.parse("x!=y", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertFalse(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
+    eval = Parser.parse("z==w", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertTrue(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
 
-      eval = Parser.parse("x==z", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertTrue(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
-
-      eval = Parser.parse("x!=z", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertFalse(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
-
-      eval = Parser.parse("z==w", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertTrue(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
-
-      eval = Parser.parse("z!=w", ExprMacroTable.nil()).eval(bindings);
-      Assert.assertFalse(eval.asBoolean());
-      assertEquals(ExpressionType.LONG, eval.type());
-    }
-    finally {
-      ExpressionProcessing.initializeForTests();
-    }
+    eval = Parser.parse("z!=w", ExprMacroTable.nil()).eval(bindings);
+    Assert.assertFalse(eval.asBoolean());
+    assertEquals(ExpressionType.LONG, eval.type());
   }
 
   @Test
@@ -752,142 +893,58 @@ public class EvalTest extends InitializedNullHandlingTest
   {
     Expr.ObjectBinding bindings = InputBindings.nilBindings();
 
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(true);
-      assertEquals(1L, eval("'true' && 'true'", bindings).value());
-      assertEquals(0L, eval("'true' && 'false'", bindings).value());
-      assertEquals(0L, eval("'false' && 'true'", bindings).value());
-      assertEquals(0L, eval("'troo' && 'true'", bindings).value());
-      assertEquals(0L, eval("'false' && 'false'", bindings).value());
+    assertEquals(1L, eval("'true' && 'true'", bindings).value());
+    assertEquals(0L, eval("'true' && 'false'", bindings).value());
+    assertEquals(0L, eval("'false' && 'true'", bindings).value());
+    assertEquals(0L, eval("'troo' && 'true'", bindings).value());
+    assertEquals(0L, eval("'false' && 'false'", bindings).value());
 
-      assertEquals(1L, eval("'true' || 'true'", bindings).value());
-      assertEquals(1L, eval("'true' || 'false'", bindings).value());
-      assertEquals(1L, eval("'false' || 'true'", bindings).value());
-      assertEquals(1L, eval("'troo' || 'true'", bindings).value());
-      assertEquals(0L, eval("'false' || 'false'", bindings).value());
+    assertEquals(1L, eval("'true' || 'true'", bindings).value());
+    assertEquals(1L, eval("'true' || 'false'", bindings).value());
+    assertEquals(1L, eval("'false' || 'true'", bindings).value());
+    assertEquals(1L, eval("'troo' || 'true'", bindings).value());
+    assertEquals(0L, eval("'false' || 'false'", bindings).value());
 
-      assertEquals(1L, eval("1 && 1", bindings).value());
-      assertEquals(1L, eval("100 && 11", bindings).value());
-      assertEquals(0L, eval("1 && 0", bindings).value());
-      assertEquals(0L, eval("0 && 1", bindings).value());
-      assertEquals(0L, eval("0 && 0", bindings).value());
+    assertEquals(1L, eval("1 && 1", bindings).value());
+    assertEquals(1L, eval("100 && 11", bindings).value());
+    assertEquals(0L, eval("1 && 0", bindings).value());
+    assertEquals(0L, eval("0 && 1", bindings).value());
+    assertEquals(0L, eval("0 && 0", bindings).value());
 
-      assertEquals(1L, eval("1 || 1", bindings).value());
-      assertEquals(1L, eval("100 || 11", bindings).value());
-      assertEquals(1L, eval("1 || 0", bindings).value());
-      assertEquals(1L, eval("0 || 1", bindings).value());
-      assertEquals(1L, eval("111 || 0", bindings).value());
-      assertEquals(1L, eval("0 || 111", bindings).value());
-      assertEquals(0L, eval("0 || 0", bindings).value());
+    assertEquals(1L, eval("1 || 1", bindings).value());
+    assertEquals(1L, eval("100 || 11", bindings).value());
+    assertEquals(1L, eval("1 || 0", bindings).value());
+    assertEquals(1L, eval("0 || 1", bindings).value());
+    assertEquals(1L, eval("111 || 0", bindings).value());
+    assertEquals(1L, eval("0 || 111", bindings).value());
+    assertEquals(0L, eval("0 || 0", bindings).value());
 
-      assertEquals(1L, eval("1.0 && 1.0", bindings).value());
-      assertEquals(1L, eval("0.100 && 1.1", bindings).value());
-      assertEquals(0L, eval("1.0 && 0.0", bindings).value());
-      assertEquals(0L, eval("0.0 && 1.0", bindings).value());
-      assertEquals(0L, eval("0.0 && 0.0", bindings).value());
+    assertEquals(1L, eval("1.0 && 1.0", bindings).value());
+    assertEquals(1L, eval("0.100 && 1.1", bindings).value());
+    assertEquals(0L, eval("1.0 && 0.0", bindings).value());
+    assertEquals(0L, eval("0.0 && 1.0", bindings).value());
+    assertEquals(0L, eval("0.0 && 0.0", bindings).value());
 
-      assertEquals(1L, eval("1.0 || 1.0", bindings).value());
-      assertEquals(1L, eval("0.2 || 0.3", bindings).value());
-      assertEquals(1L, eval("1.0 || 0.0", bindings).value());
-      assertEquals(1L, eval("0.0 || 1.0", bindings).value());
-      assertEquals(1L, eval("1.11 || 0.0", bindings).value());
-      assertEquals(1L, eval("0.0 || 0.111", bindings).value());
-      assertEquals(0L, eval("0.0 || 0.0", bindings).value());
+    assertEquals(1L, eval("1.0 || 1.0", bindings).value());
+    assertEquals(1L, eval("0.2 || 0.3", bindings).value());
+    assertEquals(1L, eval("1.0 || 0.0", bindings).value());
+    assertEquals(1L, eval("0.0 || 1.0", bindings).value());
+    assertEquals(1L, eval("1.11 || 0.0", bindings).value());
+    assertEquals(1L, eval("0.0 || 0.111", bindings).value());
+    assertEquals(0L, eval("0.0 || 0.0", bindings).value());
 
-      assertEquals(1L, eval("null || 1", bindings).value());
-      assertEquals(1L, eval("1 || null", bindings).value());
-      // in sql incompatible mode, null is false, so we return 0
-      assertEquals(NullHandling.defaultLongValue(), eval("null || 0", bindings).valueOrDefault());
-      assertEquals(NullHandling.defaultLongValue(), eval("0 || null", bindings).valueOrDefault());
-      assertEquals(NullHandling.defaultLongValue(), eval("null || null", bindings).valueOrDefault());
+    assertEquals(1L, eval("null || 1", bindings).value());
+    assertEquals(1L, eval("1 || null", bindings).value());
+    assertNull(eval("null || 0", bindings).valueOrDefault());
+    assertNull(eval("0 || null", bindings).valueOrDefault());
+    assertNull(eval("null || null", bindings).valueOrDefault());
 
-      // in sql incompatible mode, null is false, so we return 0
-      assertEquals(NullHandling.defaultLongValue(), eval("null && 1", bindings).valueOrDefault());
-      assertEquals(NullHandling.defaultLongValue(), eval("1 && null", bindings).valueOrDefault());
-      assertEquals(NullHandling.defaultLongValue(), eval("null && null", bindings).valueOrDefault());
-      // if either side is false, output is false in both modes
-      assertEquals(0L, eval("null && 0", bindings).value());
-      assertEquals(0L, eval("0 && null", bindings).value());
-    }
-    finally {
-      // reset
-      ExpressionProcessing.initializeForTests();
-    }
-
-    try {
-      // turn on legacy insanity mode
-      ExpressionProcessing.initializeForStrictBooleansTests(false);
-
-      assertEquals("true", eval("'true' && 'true'", bindings).value());
-      assertEquals("false", eval("'true' && 'false'", bindings).value());
-      assertEquals("false", eval("'false' && 'true'", bindings).value());
-      assertEquals("troo", eval("'troo' && 'true'", bindings).value());
-      assertEquals("false", eval("'false' && 'false'", bindings).value());
-
-      assertEquals("true", eval("'true' || 'true'", bindings).value());
-      assertEquals("true", eval("'true' || 'false'", bindings).value());
-      assertEquals("true", eval("'false' || 'true'", bindings).value());
-      assertEquals("true", eval("'troo' || 'true'", bindings).value());
-      assertEquals("false", eval("'false' || 'false'", bindings).value());
-
-      assertEquals(1.0, eval("1.0 && 1.0", bindings).value());
-      assertEquals(1.1, eval("0.100 && 1.1", bindings).value());
-      assertEquals(0.0, eval("1.0 && 0.0", bindings).value());
-      assertEquals(0.0, eval("0.0 && 1.0", bindings).value());
-      assertEquals(0.0, eval("0.0 && 0.0", bindings).value());
-
-      assertEquals(1.0, eval("1.0 || 1.0", bindings).value());
-      assertEquals(0.2, eval("0.2 || 0.3", bindings).value());
-      assertEquals(1.0, eval("1.0 || 0.0", bindings).value());
-      assertEquals(1.0, eval("0.0 || 1.0", bindings).value());
-      assertEquals(1.11, eval("1.11 || 0.0", bindings).value());
-      assertEquals(0.111, eval("0.0 || 0.111", bindings).value());
-      assertEquals(0.0, eval("0.0 || 0.0", bindings).value());
-
-      assertEquals(1L, eval("1 && 1", bindings).value());
-      assertEquals(11L, eval("100 && 11", bindings).value());
-      assertEquals(0L, eval("1 && 0", bindings).value());
-      assertEquals(0L, eval("0 && 1", bindings).value());
-      assertEquals(0L, eval("0 && 0", bindings).value());
-
-      assertEquals(1L, eval("1 || 1", bindings).value());
-      assertEquals(100L, eval("100 || 11", bindings).value());
-      assertEquals(1L, eval("1 || 0", bindings).value());
-      assertEquals(1L, eval("0 || 1", bindings).value());
-      assertEquals(111L, eval("111 || 0", bindings).value());
-      assertEquals(111L, eval("0 || 111", bindings).value());
-      assertEquals(0L, eval("0 || 0", bindings).value());
-
-      assertEquals(1.0, eval("1.0 && 1.0", bindings).value());
-      assertEquals(1.1, eval("0.100 && 1.1", bindings).value());
-      assertEquals(0.0, eval("1.0 && 0.0", bindings).value());
-      assertEquals(0.0, eval("0.0 && 1.0", bindings).value());
-      assertEquals(0.0, eval("0.0 && 0.0", bindings).value());
-
-      assertEquals(1.0, eval("1.0 || 1.0", bindings).value());
-      assertEquals(0.2, eval("0.2 || 0.3", bindings).value());
-      assertEquals(1.0, eval("1.0 || 0.0", bindings).value());
-      assertEquals(1.0, eval("0.0 || 1.0", bindings).value());
-      assertEquals(1.11, eval("1.11 || 0.0", bindings).value());
-      assertEquals(0.111, eval("0.0 || 0.111", bindings).value());
-      assertEquals(0.0, eval("0.0 || 0.0", bindings).value());
-
-      assertEquals(1L, eval("null || 1", bindings).value());
-      assertEquals(1L, eval("1 || null", bindings).value());
-      assertEquals(0L, eval("null || 0", bindings).value());
-      Assert.assertNull(eval("0 || null", bindings).value());
-      Assert.assertNull(eval("null || null", bindings).value());
-
-      Assert.assertNull(eval("null && 1", bindings).value());
-      Assert.assertNull(eval("1 && null", bindings).value());
-      Assert.assertNull(eval("null && 0", bindings).value());
-      assertEquals(0L, eval("0 && null", bindings).value());
-      assertNull(eval("null && null", bindings).value());
-    }
-    finally {
-      // reset
-      ExpressionProcessing.initializeForTests();
-    }
+    assertNull(eval("null && 1", bindings).valueOrDefault());
+    assertNull(eval("1 && null", bindings).valueOrDefault());
+    assertNull(eval("null && null", bindings).valueOrDefault());
+    // if either side is false, output is false in both modes
+    assertEquals(0L, eval("null && 0", bindings).value());
+    assertEquals(0L, eval("0 && null", bindings).value());
   }
 
   @Test
@@ -904,86 +961,88 @@ public class EvalTest extends InitializedNullHandlingTest
     bindingsMap.put("b2", false);
     Expr.ObjectBinding bindings = InputBindings.forMap(bindingsMap);
 
-    try {
-      ExpressionProcessing.initializeForStrictBooleansTests(true);
-      assertEquals(1L, eval("s1 && s1", bindings).value());
-      assertEquals(0L, eval("s1 && s2", bindings).value());
-      assertEquals(0L, eval("s2 && s1", bindings).value());
-      assertEquals(0L, eval("s2 && s2", bindings).value());
+    assertEquals(1L, eval("s1 && s1", bindings).value());
+    assertEquals(0L, eval("s1 && s2", bindings).value());
+    assertEquals(0L, eval("s2 && s1", bindings).value());
+    assertEquals(0L, eval("s2 && s2", bindings).value());
 
-      assertEquals(1L, eval("s1 || s1", bindings).value());
-      assertEquals(1L, eval("s1 || s2", bindings).value());
-      assertEquals(1L, eval("s2 || s1", bindings).value());
-      assertEquals(0L, eval("s2 || s2", bindings).value());
+    assertEquals(1L, eval("s1 || s1", bindings).value());
+    assertEquals(1L, eval("s1 || s2", bindings).value());
+    assertEquals(1L, eval("s2 || s1", bindings).value());
+    assertEquals(0L, eval("s2 || s2", bindings).value());
 
-      assertEquals(1L, eval("l1 && l1", bindings).value());
-      assertEquals(0L, eval("l1 && l2", bindings).value());
-      assertEquals(0L, eval("l2 && l1", bindings).value());
-      assertEquals(0L, eval("l2 && l2", bindings).value());
+    assertEquals(1L, eval("l1 && l1", bindings).value());
+    assertEquals(0L, eval("l1 && l2", bindings).value());
+    assertEquals(0L, eval("l2 && l1", bindings).value());
+    assertEquals(0L, eval("l2 && l2", bindings).value());
 
-      assertEquals(1L, eval("b1 && b1", bindings).value());
-      assertEquals(0L, eval("b1 && b2", bindings).value());
-      assertEquals(0L, eval("b2 && b1", bindings).value());
-      assertEquals(0L, eval("b2 && b2", bindings).value());
+    assertEquals(1L, eval("b1 && b1", bindings).value());
+    assertEquals(0L, eval("b1 && b2", bindings).value());
+    assertEquals(0L, eval("b2 && b1", bindings).value());
+    assertEquals(0L, eval("b2 && b2", bindings).value());
 
-      assertEquals(1L, eval("d1 && d1", bindings).value());
-      assertEquals(0L, eval("d1 && d2", bindings).value());
-      assertEquals(0L, eval("d2 && d1", bindings).value());
-      assertEquals(0L, eval("d2 && d2", bindings).value());
+    assertEquals(1L, eval("d1 && d1", bindings).value());
+    assertEquals(0L, eval("d1 && d2", bindings).value());
+    assertEquals(0L, eval("d2 && d1", bindings).value());
+    assertEquals(0L, eval("d2 && d2", bindings).value());
 
-      assertEquals(1L, eval("b1", bindings).value());
-      assertEquals(1L, eval("if(b1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(l1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(d1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(s1,1,0)", bindings).value());
-      assertEquals(0L, eval("if(b2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(l2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(d2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(s2,1,0)", bindings).value());
-    }
-    finally {
-      // reset
-      ExpressionProcessing.initializeForTests();
-    }
+    assertEquals(1L, eval("b1", bindings).value());
+    assertEquals(1L, eval("if(b1,1,0)", bindings).value());
+    assertEquals(1L, eval("if(l1,1,0)", bindings).value());
+    assertEquals(1L, eval("if(d1,1,0)", bindings).value());
+    assertEquals(1L, eval("if(s1,1,0)", bindings).value());
+    assertEquals(0L, eval("if(b2,1,0)", bindings).value());
+    assertEquals(0L, eval("if(l2,1,0)", bindings).value());
+    assertEquals(0L, eval("if(d2,1,0)", bindings).value());
+    assertEquals(0L, eval("if(s2,1,0)", bindings).value());
+  }
 
-    try {
-      // turn on legacy insanity mode
-      ExpressionProcessing.initializeForStrictBooleansTests(false);
+  @Test
+  public void testArrayComparison()
+  {
+    Expr.ObjectBinding bindings = InputBindings.forInputSuppliers(
+        ImmutableMap.<String, InputBindings.InputSupplier<?>>builder()
+                    .put(
+                        "stringArray",
+                        InputBindings.inputSupplier(ExpressionType.STRING_ARRAY, () -> new Object[]{"a", "b", null, "c"})
+                    )
+                    .put(
+                        "longArray",
+                        InputBindings.inputSupplier(ExpressionType.LONG_ARRAY, () -> new Object[]{1L, null, 2L, 3L})
+                    )
+                    .put(
+                        "doubleArray",
+                        InputBindings.inputSupplier(ExpressionType.DOUBLE_ARRAY, () -> new Object[]{1.1, 2.2, 3.3, null})
+                    )
+                    .build()
+    );
 
-      assertEquals("true", eval("s1 && s1", bindings).value());
-      assertEquals("false", eval("s1 && s2", bindings).value());
-      assertEquals("false", eval("s2 && s1", bindings).value());
-      assertEquals("false", eval("s2 && s2", bindings).value());
+    Assert.assertEquals(0L, eval("['a','b',null,'c'] > stringArray", bindings).value());
+    Assert.assertEquals(1L, eval("['a','b',null,'c'] >= stringArray", bindings).value());
+    Assert.assertEquals(1L, eval("['a','b',null,'c'] == stringArray", bindings).value());
+    Assert.assertEquals(0L, eval("['a','b',null,'c'] != stringArray", bindings).value());
+    Assert.assertEquals(1L, eval("notdistinctfrom(['a','b',null,'c'], stringArray)", bindings).value());
+    Assert.assertEquals(0L, eval("isdistinctfrom(['a','b',null,'c'], stringArray)", bindings).value());
+    Assert.assertEquals(1L, eval("['a','b',null,'c'] <= stringArray", bindings).value());
+    Assert.assertEquals(0L, eval("['a','b',null,'c'] < stringArray", bindings).value());
 
-      assertEquals("true", eval("b1 && b1", bindings).value());
-      assertEquals("false", eval("b1 && b2", bindings).value());
-      assertEquals("false", eval("b2 && b1", bindings).value());
-      assertEquals("false", eval("b2 && b2", bindings).value());
+    Assert.assertEquals(0L, eval("[1,null,2,3] > longArray", bindings).value());
+    Assert.assertEquals(1L, eval("[1,null,2,3] >= longArray", bindings).value());
+    Assert.assertEquals(1L, eval("[1,null,2,3] == longArray", bindings).value());
+    Assert.assertEquals(0L, eval("[1,null,2,3] != longArray", bindings).value());
+    Assert.assertEquals(1L, eval("notdistinctfrom([1,null,2,3], longArray)", bindings).value());
+    Assert.assertEquals(0L, eval("isdistinctfrom([1,null,2,3], longArray)", bindings).value());
+    Assert.assertEquals(1L, eval("[1,null,2,3] <= longArray", bindings).value());
+    Assert.assertEquals(0L, eval("[1,null,2,3] < longArray", bindings).value());
 
-      assertEquals(100L, eval("l1 && l1", bindings).value());
-      assertEquals(0L, eval("l1 && l2", bindings).value());
-      assertEquals(0L, eval("l2 && l1", bindings).value());
-      assertEquals(0L, eval("l2 && l2", bindings).value());
-
-      assertEquals(1.1, eval("d1 && d1", bindings).value());
-      assertEquals(0.0, eval("d1 && d2", bindings).value());
-      assertEquals(0.0, eval("d2 && d1", bindings).value());
-      assertEquals(0.0, eval("d2 && d2", bindings).value());
-
-      assertEquals("true", eval("b1", bindings).value());
-      assertEquals(1L, eval("if(b1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(l1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(d1,1,0)", bindings).value());
-      assertEquals(1L, eval("if(s1,1,0)", bindings).value());
-      assertEquals(0L, eval("if(b2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(l2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(d2,1,0)", bindings).value());
-      assertEquals(0L, eval("if(s2,1,0)", bindings).value());
-    }
-    finally {
-      // reset
-      ExpressionProcessing.initializeForTests();
-    }
+    Assert.assertEquals(0L, eval("[1.1,2.2,3.3,null] > doubleArray", bindings).value());
+    Assert.assertEquals(1L, eval("[1.1,2.2,3.3,null] >= doubleArray", bindings).value());
+    Assert.assertEquals(1L, eval("[1.1,2.2,3.3,null] == doubleArray", bindings).value());
+    Assert.assertEquals(0L, eval("[1.1,2.2,3.3,null] != doubleArray", bindings).value());
+    Assert.assertEquals(1L, eval("notdistinctfrom([1.1,2.2,3.3,null], doubleArray)", bindings).value());
+    Assert.assertEquals(0L, eval("isdistinctfrom([1.1,2.2,3.3,null], doubleArray)", bindings).value());
+    Assert.assertEquals(1L, eval("[1.1,2.2,3.3,null] <= doubleArray", bindings).value());
+    Assert.assertEquals(0L, eval("[1.1,2.2,3.3,null] < doubleArray", bindings).value());
   }
 
   @Test
@@ -991,19 +1050,10 @@ public class EvalTest extends InitializedNullHandlingTest
   {
     ExprEval<?> longNull = ExprEval.ofLong(null);
     ExprEval<?> doubleNull = ExprEval.ofDouble(null);
-    Assert.assertEquals(NullHandling.sqlCompatible(), longNull.isNumericNull());
-    Assert.assertEquals(NullHandling.sqlCompatible(), doubleNull.isNumericNull());
-    Assert.assertEquals(NullHandling.defaultLongValue(), longNull.valueOrDefault());
-    Assert.assertEquals(NullHandling.defaultDoubleValue(), doubleNull.valueOrDefault());
-    if (NullHandling.replaceWithDefault()) {
-      Assert.assertEquals(0L, longNull.asLong());
-      Assert.assertEquals(0, longNull.asInt());
-      Assert.assertEquals(0.0, longNull.asDouble(), 0.0);
-
-      Assert.assertEquals(0L, doubleNull.asLong());
-      Assert.assertEquals(0, doubleNull.asInt());
-      Assert.assertEquals(0.0, doubleNull.asDouble(), 0.0);
-    }
+    Assert.assertTrue(longNull.isNumericNull());
+    Assert.assertTrue(doubleNull.isNumericNull());
+    Assert.assertNull(null, longNull.valueOrDefault());
+    Assert.assertNull(null, doubleNull.valueOrDefault());
   }
 
   @Test
@@ -1103,145 +1153,145 @@ public class EvalTest extends InitializedNullHandlingTest
     Assert.assertEquals("notbase64", eval.value());
 
     // arrays
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
     eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, ImmutableList.of(1L, 2L, 3L));
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
     eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Long[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
     eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new long[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
     eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new int[]{1, 2, 3});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, null, 3L});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, null, 3L});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, null, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, null, 3L}, (Object[]) eval.value());
 
     // arrays might have to fall back to using 'bestEffortOf', but will cast it to the expected output type
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {"1", "2", "3"});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{"1", "2", "3"});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new String[] {"1", "2", "3"});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new String[]{"1", "2", "3"});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {"1", "2", "wat", "3"});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{"1", "2", "wat", "3"});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, null, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, null, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new double[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new double[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {1.0, 2.0, null, 3.0});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{1.0, 2.0, null, 3.0});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, null, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, null, 3L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[] {1.0, 2L, "3", true, false});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new Object[]{1.0, 2L, "3", true, false});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L, 1L, 0L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L, 1L, 0L}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new float[] {1.0f, 2.0f, 3.0f});
+    eval = ExprEval.ofType(ExpressionType.LONG_ARRAY, new float[]{1.0f, 2.0f, 3.0f});
     Assert.assertEquals(ExpressionType.LONG_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1L, 2L, 3L}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1L, 2L, 3L}, (Object[]) eval.value());
 
     // etc
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Double[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Double[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new double[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new double[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {"1", "2", "3"});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{"1", "2", "3"});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {"1", "2", "wat", "3"});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{"1", "2", "wat", "3"});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, null, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, null, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {1L, 2L, 3L});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new long[] {1L, 2L, 3L});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new long[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {1L, 2L, null, 3L});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{1L, 2L, null, 3L});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, null, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, null, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2L, "3", true, false});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2L, "3", true, false});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0, 1.0, 0.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0, 1.0, 0.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Float[] {1.0f, 2.0f, 3.0f});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new Float[]{1.0f, 2.0f, 3.0f});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new float[] {1.0f, 2.0f, 3.0f});
+    eval = ExprEval.ofType(ExpressionType.DOUBLE_ARRAY, new float[]{1.0f, 2.0f, 3.0f});
     Assert.assertEquals(ExpressionType.DOUBLE_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {1.0, 2.0, 3.0}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{1.0, 2.0, 3.0}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[] {"1", "2", "3"});
+    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[]{"1", "2", "3"});
     Assert.assertEquals(ExpressionType.STRING_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {"1", "2", "3"}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{"1", "2", "3"}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[] {1L, 2L, 3L});
+    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[]{1L, 2L, 3L});
     Assert.assertEquals(ExpressionType.STRING_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {"1", "2", "3"}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{"1", "2", "3"}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[] {1.0, 2.0, 3.0});
+    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[]{1.0, 2.0, 3.0});
     Assert.assertEquals(ExpressionType.STRING_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {"1.0", "2.0", "3.0"}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{"1.0", "2.0", "3.0"}, (Object[]) eval.value());
 
-    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[] {1.0, 2L, "3", true, false});
+    eval = ExprEval.ofType(ExpressionType.STRING_ARRAY, new Object[]{1.0, 2L, "3", true, false});
     Assert.assertEquals(ExpressionType.STRING_ARRAY, eval.type());
-    Assert.assertArrayEquals(new Object[] {"1.0", "2", "3", "true", "false"}, (Object[]) eval.value());
+    Assert.assertArrayEquals(new Object[]{"1.0", "2", "3", "true", "false"}, (Object[]) eval.value());
 
     // nested arrays
     ExpressionType nestedLongArray = ExpressionTypeFactory.getInstance().ofArray(ExpressionType.LONG_ARRAY);
     final Object[] expectedLongArray = new Object[]{
-        new Object[] {1L, 2L, 3L},
-        new Object[] {5L, null, 9L},
+        new Object[]{1L, 2L, 3L},
+        new Object[]{5L, null, 9L},
         null,
-        new Object[] {2L, 4L, 6L}
+        new Object[]{2L, 4L, 6L}
     };
 
     List<?> longArrayInputs = Arrays.asList(
         new Object[]{
-            new Object[] {1L, 2L, 3L},
-            new Object[] {5L, null, 9L},
+            new Object[]{1L, 2L, 3L},
+            new Object[]{5L, null, 9L},
             null,
-            new Object[] {2L, 4L, 6L}
+            new Object[]{2L, 4L, 6L}
         },
         Arrays.asList(
-            new Object[] {1L, 2L, 3L},
-            new Object[] {5L, null, 9L},
+            new Object[]{1L, 2L, 3L},
+            new Object[]{5L, null, 9L},
             null,
-            new Object[] {2L, 4L, 6L}
+            new Object[]{2L, 4L, 6L}
         ),
         Arrays.asList(
             Arrays.asList(1L, 2L, 3L),
@@ -1269,18 +1319,18 @@ public class EvalTest extends InitializedNullHandlingTest
 
     ExpressionType nestedDoubleArray = ExpressionTypeFactory.getInstance().ofArray(ExpressionType.DOUBLE_ARRAY);
     final Object[] expectedDoubleArray = new Object[]{
-        new Object[] {1.1, 2.2, 3.3},
-        new Object[] {5.5, null, 9.9},
+        new Object[]{1.1, 2.2, 3.3},
+        new Object[]{5.5, null, 9.9},
         null,
-        new Object[] {2.2, 4.4, 6.6}
+        new Object[]{2.2, 4.4, 6.6}
     };
 
     List<?> doubleArrayInputs = Arrays.asList(
         new Object[]{
-            new Object[] {1.1, 2.2, 3.3},
-            new Object[] {5.5, null, 9.9},
+            new Object[]{1.1, 2.2, 3.3},
+            new Object[]{5.5, null, 9.9},
             null,
-            new Object[] {2.2, 4.4, 6.6}
+            new Object[]{2.2, 4.4, 6.6}
         },
         new Object[]{
             Arrays.asList(1.1, 2.2, 3.3),
@@ -1295,10 +1345,10 @@ public class EvalTest extends InitializedNullHandlingTest
             Arrays.asList(2.2, 4.4, 6.6)
         ),
         new Object[]{
-            new Object[] {"1.1", "2.2", "3.3"},
+            new Object[]{"1.1", "2.2", "3.3"},
             Arrays.asList("5.5", null, "9.9"),
             null,
-            new String[] {"2.2", "4.4", "6.6"}
+            new String[]{"2.2", "4.4", "6.6"}
         }
     );
 
@@ -1319,9 +1369,6 @@ public class EvalTest extends InitializedNullHandlingTest
     // strings
     assertBestEffortOf("stringy", ExpressionType.STRING, "stringy");
 
-    // by default, booleans are handled as strings
-    assertBestEffortOf(true, ExpressionType.STRING, "true");
-    assertBestEffortOf(Arrays.asList(true, false), ExpressionType.STRING_ARRAY, new Object[]{"true", "false"});
 
     assertBestEffortOf(
         new byte[]{1, 2, 3, 4},
@@ -1333,61 +1380,60 @@ public class EvalTest extends InitializedNullHandlingTest
     assertBestEffortOf(1L, ExpressionType.LONG, 1L);
     assertBestEffortOf(1, ExpressionType.LONG, 1L);
 
-    try {
-      // in strict boolean mode, they are longs
-      ExpressionProcessing.initializeForStrictBooleansTests(true);
-      assertBestEffortOf(true, ExpressionType.LONG, 1L);
-      assertBestEffortOf(Arrays.asList(true, false), ExpressionType.LONG_ARRAY, new Object[]{1L, 0L});
-    }
-    finally {
-      // reset
-      ExpressionProcessing.initializeForTests();
-    }
+    // by default, booleans are handled as longs
+    assertBestEffortOf(true, ExpressionType.LONG, 1L);
+    assertBestEffortOf(Arrays.asList(true, false), ExpressionType.LONG_ARRAY, new Object[]{1L, 0L});
 
     // doubles
     assertBestEffortOf(1.0, ExpressionType.DOUBLE, 1.0);
     assertBestEffortOf(1.0f, ExpressionType.DOUBLE, 1.0);
 
     // arrays
-    assertBestEffortOf(new Object[] {1L, 2L, 3L}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
-    assertBestEffortOf(new Object[] {1L, 2L, null, 3L}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, null, 3L});
-    assertBestEffortOf(ImmutableList.of(1L, 2L, 3L), ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
-    assertBestEffortOf(new long[] {1L, 2L, 3L}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
-    assertBestEffortOf(new Object[] {1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
-    assertBestEffortOf(new Integer[] {1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
-    assertBestEffortOf(new int[] {1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[] {1L, 2L, 3L});
+    assertBestEffortOf(new Object[]{1L, 2L, 3L}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
+    assertBestEffortOf(new Object[]{1L, 2L, null, 3L}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, null, 3L});
+    assertBestEffortOf(ImmutableList.of(1L, 2L, 3L), ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
+    assertBestEffortOf(new long[]{1L, 2L, 3L}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
+    assertBestEffortOf(new Object[]{1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
+    assertBestEffortOf(new Integer[]{1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
+    assertBestEffortOf(new int[]{1, 2, 3}, ExpressionType.LONG_ARRAY, new Object[]{1L, 2L, 3L});
 
-    assertBestEffortOf(new Object[] {1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
+    assertBestEffortOf(new Object[]{1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
     assertBestEffortOf(
-        new Object[] {null, 1.0, 2.0, 3.0},
+        new Object[]{null, 1.0, 2.0, 3.0},
         ExpressionType.DOUBLE_ARRAY,
-        new Object[] {null, 1.0, 2.0, 3.0}
+        new Object[]{null, 1.0, 2.0, 3.0}
     );
-    assertBestEffortOf(new Double[] {1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
-    assertBestEffortOf(new double[] {1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
-    assertBestEffortOf(new Object[] {1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
-    assertBestEffortOf(new Float[] {1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
-    assertBestEffortOf(new float[] {1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0, 3.0});
+    assertBestEffortOf(new Double[]{1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
+    assertBestEffortOf(new double[]{1.0, 2.0, 3.0}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
+    assertBestEffortOf(new Object[]{1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
+    assertBestEffortOf(new Float[]{1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
+    assertBestEffortOf(new float[]{1.0f, 2.0f, 3.0f}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0, 3.0});
 
-    assertBestEffortOf(new Object[] {"1", "2", "3"}, ExpressionType.STRING_ARRAY, new Object[] {"1", "2", "3"});
-    assertBestEffortOf(new String[] {"1", "2", "3"}, ExpressionType.STRING_ARRAY, new Object[] {"1", "2", "3"});
-    assertBestEffortOf(ImmutableList.of("1", "2", "3"), ExpressionType.STRING_ARRAY, new Object[] {"1", "2", "3"});
+    assertBestEffortOf(new Object[]{"1", "2", "3"}, ExpressionType.STRING_ARRAY, new Object[]{"1", "2", "3"});
+    assertBestEffortOf(new String[]{"1", "2", "3"}, ExpressionType.STRING_ARRAY, new Object[]{"1", "2", "3"});
+    assertBestEffortOf(ImmutableList.of("1", "2", "3"), ExpressionType.STRING_ARRAY, new Object[]{"1", "2", "3"});
 
     // arrays end up as the least restrictive type
-    assertBestEffortOf(new Object[] {1.0, 2L}, ExpressionType.DOUBLE_ARRAY, new Object[] {1.0, 2.0});
+    assertBestEffortOf(new Object[]{1.0, 2L}, ExpressionType.DOUBLE_ARRAY, new Object[]{1.0, 2.0});
 
     // arrays end up as the least restrictive type
     assertBestEffortOf(
-        new Object[] {1.0, 2L, "3", true, false},
+        new Object[]{1.0, 2L, "3", true, false},
         ExpressionType.STRING_ARRAY,
-        new Object[] {"1.0", "2", "3", "true", "false"}
+        new Object[]{"1.0", "2", "3", "true", "false"}
     );
 
-    // best effort of doesn't know of nested type, what happens if we have some nested data?
     assertBestEffortOf(
         ImmutableMap.of("x", 1L, "y", 2L),
-        ExpressionType.UNKNOWN_COMPLEX,
+        ExpressionType.NESTED_DATA,
         ImmutableMap.of("x", 1L, "y", 2L)
+    );
+
+    SerializablePair<String, Long> someOtherComplex = new SerializablePair<>("hello", 1234L);
+    assertBestEffortOf(
+        someOtherComplex,
+        ExpressionType.UNKNOWN_COMPLEX,
+        someOtherComplex
     );
   }
 

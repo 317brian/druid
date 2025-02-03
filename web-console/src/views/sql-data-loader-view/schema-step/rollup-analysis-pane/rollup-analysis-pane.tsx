@@ -21,6 +21,7 @@ import { IconNames } from '@blueprintjs/icons';
 import type { CancelToken } from 'axios';
 import type { QueryResult, SqlQuery } from 'druid-query-toolkit';
 import { F, SqlExpression, SqlFunction } from 'druid-query-toolkit';
+import type { JSX } from 'react';
 import React, { useEffect } from 'react';
 
 import type { Execution } from '../../../../druid-models';
@@ -319,7 +320,7 @@ export const RollupAnalysisPane = React.memo(function RollupAnalysisPane(
           />
         </p>
       )}
-      {(singleDimensionSuggestions.length || pairDimensionSuggestions.length > 0) && (
+      {(!!singleDimensionSuggestions.length || pairDimensionSuggestions.length > 0) && (
         <>
           <p>Poor rollup is caused by:</p>
           <p>

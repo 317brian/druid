@@ -92,8 +92,17 @@ public class CastOperatorConversion implements SqlOperatorConversion
                                               ? ExpressionType.fromColumnType(fromDruidType)
                                               : ExpressionType.fromColumnType(toDruidType);
 
-      if (fromExpressionType == null || toExpressionType == null) {
-        // We have no runtime type for these SQL types.
+      if (toExpressionType == null) {
+        // We have no runtime type for to SQL type.
+        return null;
+      }
+      if (fromExpressionType == null) {
+        // Calcites.getColumnTypeForRelDataType returns null in cases of NULL, but also any type which cannot be
+        // mapped to a native druid type. in the case of the former, make a null literal of the toType
+        if (fromType.equals(SqlTypeName.NULL)) {
+          return DruidExpression.ofLiteral(toDruidType, DruidExpression.nullLiteral());
+        }
+        // otherwise, we have no runtime type for from SQL type.
         return null;
       }
 
@@ -118,7 +127,7 @@ public class CastOperatorConversion implements SqlOperatorConversion
         return TimeFloorOperatorConversion.applyTimestampFloor(
             typeCastExpression,
             new PeriodGranularity(Period.days(1), null, plannerContext.getTimeZone()),
-            plannerContext.getExprMacroTable()
+            plannerContext
         );
       } else {
         return typeCastExpression;
@@ -148,7 +157,7 @@ public class CastOperatorConversion implements SqlOperatorConversion
       return TimeFloorOperatorConversion.applyTimestampFloor(
           timestampExpression,
           new PeriodGranularity(Period.days(1), null, plannerContext.getTimeZone()),
-          plannerContext.getExprMacroTable()
+          plannerContext
       );
     } else if (toType == SqlTypeName.TIMESTAMP) {
       return timestampExpression;

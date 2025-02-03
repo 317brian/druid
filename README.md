@@ -17,26 +17,26 @@
   ~ under the License.
   -->
 
-[![Coverage Status](https://img.shields.io/codecov/c/gh/apache/druid)](https://codecov.io/gh/apache/druid)
-[![Docker](https://img.shields.io/badge/container-docker-blue.svg)](https://hub.docker.com/r/apache/druid)
-[![Helm](https://img.shields.io/badge/helm-druid-5F90AB?logo=helm)](https://github.com/apache/druid/blob/master/helm/druid/README.md)
+[![Coverage Status](https://img.shields.io/codecov/c/gh/apache/druid?logo=codecov)](https://codecov.io/gh/apache/druid)
+[![Docker](https://img.shields.io/badge/container-docker-blue.svg?logo=docker)](https://hub.docker.com/r/apache/druid)
+[![Helm](https://img.shields.io/badge/helm-druid-5F90AB?logo=helm)](https://github.com/asdf2014/druid-helm)
 <!--- Following badges are disabled until they can be fixed: -->
 <!--- [![Inspections Status](https://img.shields.io/teamcity/http/teamcity.jetbrains.com/s/OpenSourceProjects_Druid_Inspections.svg?label=TeamCity%20inspections)](https://teamcity.jetbrains.com/viewType.html?buildTypeId=OpenSourceProjects_Druid_Inspections) -->
 
 | Workflow                             | Status                                                       |
 | :----------------------------------- | :----------------------------------------------------------- |
-| ⚙️ CodeQL Config                      | ![codeql-config](https://img.shields.io/github/actions/workflow/status/apache/druid/codeql-config.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🔍 CodeQL                             | ![codeql](https://img.shields.io/github/actions/workflow/status/apache/druid/codeql.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🕒 Cron Job ITS                       | ![cron-job-its](https://img.shields.io/github/actions/workflow/status/apache/druid/cron-job-its.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🏷️ Labeler                            | ![labeler](https://img.shields.io/github/actions/workflow/status/apache/druid/labeler.yml?branch=master&logo=github-actions&style=flat-square) |
-| ♻️ Reusable Revised ITS               | ![reusable-revised-its](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-revised-its.yml?branch=master&logo=github-actions&style=flat-square) |
-| ♻️ Reusable Standard ITS              | ![reusable-standard-its](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-standard-its.yml?branch=master&logo=github-actions&style=flat-square) |
-| ♻️ Reusable Unit Tests                | ![reusable-unit-tests](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-unit-tests.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🔄 Revised ITS                        | ![revised-its](https://img.shields.io/github/actions/workflow/status/apache/druid/revised-its.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🔧 Standard ITS                       | ![standard-its](https://img.shields.io/github/actions/workflow/status/apache/druid/standard-its.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🛠️ Static Checks                      | ![static-checks](https://img.shields.io/github/actions/workflow/status/apache/druid/static-checks.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🧪 Unit and Integration Tests Unified | ![unit-and-integration-tests-unified](https://img.shields.io/github/actions/workflow/status/apache/druid/unit-and-integration-tests-unified.yml?branch=master&logo=github-actions&style=flat-square) |
-| 🔬 Unit Tests                         | ![unit-tests](https://img.shields.io/github/actions/workflow/status/apache/druid/unit-tests.yml?branch=master&logo=github-actions&style=flat-square) |
+| ⚙️ CodeQL Config                      | [![codeql-config](https://img.shields.io/github/actions/workflow/status/apache/druid/codeql-config.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/codeql-config.yml) |
+| 🔍 CodeQL                             | [![codeql](https://img.shields.io/github/actions/workflow/status/apache/druid/codeql.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/codeql.yml) |
+| 🕒 Cron Job ITS                       | [![cron-job-its](https://img.shields.io/github/actions/workflow/status/apache/druid/cron-job-its.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/cron-job-its.yml) |
+| 🏷️ Labeler                            | [![labeler](https://img.shields.io/github/actions/workflow/status/apache/druid/labeler.yml?logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/labeler.yml) |
+| ♻️ Reusable Revised ITS               | [![reusable-revised-its](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-revised-its.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/reusable-revised-its.yml) |
+| ♻️ Reusable Standard ITS              | [![reusable-standard-its](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-standard-its.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/reusable-standard-its.yml) |
+| ♻️ Reusable Unit Tests                | [![reusable-unit-tests](https://img.shields.io/github/actions/workflow/status/apache/druid/reusable-unit-tests.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/reusable-unit-tests.yml) |
+| 🔄 Revised ITS                        | [![revised-its](https://img.shields.io/github/actions/workflow/status/apache/druid/revised-its.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/revised-its.yml) |
+| 🔧 Standard ITS                       | [![standard-its](https://img.shields.io/github/actions/workflow/status/apache/druid/standard-its.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/standard-its.yml) |
+| 🛠️ Static Checks                      | [![static-checks](https://img.shields.io/github/actions/workflow/status/apache/druid/static-checks.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/static-checks.yml) |
+| 🧪 Unit and Integration Tests Unified | [![unit-and-integration-tests-unified](https://img.shields.io/github/actions/workflow/status/apache/druid/unit-and-integration-tests-unified.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/unit-and-integration-tests-unified.yml) |
+| 🔬 Unit Tests                         | [![unit-tests](https://img.shields.io/github/actions/workflow/status/apache/druid/unit-tests.yml?branch=master&logo=github-actions&style=flat-square)](https://github.com/apache/druid/actions/workflows/unit-tests.yml) |
 
 ---
 
@@ -87,7 +87,11 @@ Use the built-in query workbench to prototype [DruidSQL](https://druid.apache.or
 
 See the [latest documentation](https://druid.apache.org/docs/latest/) for the documentation for the current official release. If you need information on a previous release, you can browse [previous releases documentation](https://druid.apache.org/docs/).
 
-Make documentation and tutorials updates in [`/docs`](https://github.com/apache/druid/tree/master/docs) using [MarkDown](https://www.markdownguide.org/) and contribute them using a pull request.
+Make documentation and tutorials updates in [`/docs`](https://github.com/apache/druid/tree/master/docs) using [Markdown](https://www.markdownguide.org/) or extended Markdown [(MDX)](https://mdxjs.com/). Then, open a pull request.
+
+To build the site locally, you need Node 16.14 or higher and to install Docusaurus 2 with `npm|yarn install`  in the `website` directory. Then you can run `npm|yarn start` to launch a local build of the docs.
+
+If you're looking to update non-doc pages like Use Cases, those files are in the [`druid-website-src`](https://github.com/apache/druid-website-src/tree/master) repo.
 
 ### Community
 
@@ -102,7 +106,7 @@ Find articles written by community members and a calendar of upcoming events on 
 
 ### Building from source
 
-Please note that JDK 8 or JDK 11 is required to build Druid.
+Please note that JDK 11 or JDK 17 is required to build Druid.
 
 See the latest [build guide](https://druid.apache.org/docs/latest/development/build.html) for instructions on building Apache Druid from source.
 

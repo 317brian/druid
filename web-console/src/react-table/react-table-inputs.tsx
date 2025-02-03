@@ -16,11 +16,10 @@
  * limitations under the License.
  */
 
-import { Button, HTMLSelect, Icon, InputGroup, Menu, MenuItem } from '@blueprintjs/core';
+import { Button, HTMLSelect, Icon, InputGroup, Menu, MenuItem, Popover } from '@blueprintjs/core';
 import { IconNames } from '@blueprintjs/icons';
-import { Popover2 } from '@blueprintjs/popover2';
 import classNames from 'classnames';
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Column, ReactTableFunction } from 'react-table';
 
 import {
@@ -40,8 +39,10 @@ interface FilterRendererProps {
 }
 
 export function GenericFilterInput({ column, filter, onChange, key }: FilterRendererProps) {
+  const INPUT_DEBOUNCE_TIME_IN_MILLISECONDS = 1000;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [focusedText, setFocusedText] = useState<string | undefined>();
+  const [debouncedValue, setDebouncedValue] = useState<string | undefined>();
 
   const enableComparisons = String(column.headerClassName).includes('enable-comparisons');
 
@@ -50,14 +51,27 @@ export function GenericFilterInput({ column, filter, onChange, key }: FilterRend
     needle: '',
   };
 
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (focusedText !== undefined && focusedText !== debouncedValue) {
+        onChange(combineModeAndNeedle(mode, focusedText));
+        setDebouncedValue(focusedText);
+      }
+    }, INPUT_DEBOUNCE_TIME_IN_MILLISECONDS);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [focusedText, debouncedValue, mode, onChange]);
+
   return (
     <InputGroup
       className={classNames('generic-filter-input', {
-        'hide-icon': !filter && !(menuOpen || focused),
+        'hide-icon': !filter && !(menuOpen || typeof focusedText === 'string'),
       })}
       key={key}
       leftElement={
-        <Popover2
+        <Popover
           placement="bottom-start"
           minimal
           isOpen={menuOpen}
@@ -77,16 +91,22 @@ export function GenericFilterInput({ column, filter, onChange, key }: FilterRend
           }
         >
           <Button className="filter-mode-button" icon={filterModeToIcon(mode)} minimal />
-        </Popover2>
+        </Popover>
       }
-      value={needle}
-      onChange={e => onChange(combineModeAndNeedle(mode, e.target.value))}
+      value={focusedText ?? needle}
+      onChange={e => setFocusedText(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') {
+          const inputValue = (e.target as HTMLInputElement).value;
+          setDebouncedValue(undefined); // Reset debounce to avoid duplicate triggers
+          onChange(combineModeAndNeedle(mode, inputValue));
+        }
+      }}
       rightElement={
         filter ? <Button icon={IconNames.CROSS} minimal onClick={() => onChange('')} /> : undefined
       }
-      onFocus={() => setFocused(true)}
       onBlur={e => {
-        setFocused(false);
+        setFocusedText(undefined);
         if (filter && !e.target.value) onChange('');
       }}
     />
@@ -94,19 +114,18 @@ export function GenericFilterInput({ column, filter, onChange, key }: FilterRend
 }
 
 export function BooleanFilterInput({ filter, onChange, key }: FilterRendererProps) {
-  const filterValue = filter ? filter.value : '';
   return (
     <HTMLSelect
       className="boolean-filter-input"
       key={key}
       style={{ width: '100%' }}
       onChange={(event: any) => onChange(event.target.value)}
-      value={filterValue || 'all'}
+      value={filter?.value || ''}
       fill
     >
-      <option value="all">Show all</option>
-      <option value="true">true</option>
-      <option value="false">false</option>
+      <option value="">Show all</option>
+      <option value="=true">true</option>
+      <option value="=false">false</option>
     </HTMLSelect>
   );
 }

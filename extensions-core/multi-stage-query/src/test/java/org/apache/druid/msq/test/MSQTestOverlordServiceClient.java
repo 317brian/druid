@@ -20,24 +20,40 @@
 package org.apache.druid.msq.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.inject.Injector;
-import org.apache.druid.client.indexing.NoopOverlordClient;
-import org.apache.druid.indexing.common.TaskReport;
+import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.druid.client.ImmutableSegmentLoadInfo;
+import org.apache.druid.client.indexing.TaskPayloadResponse;
+import org.apache.druid.client.indexing.TaskStatusResponse;
+import org.apache.druid.indexer.TaskStatus;
+import org.apache.druid.indexer.TaskStatusPlus;
+import org.apache.druid.indexer.report.TaskReport;
 import org.apache.druid.indexing.common.actions.TaskActionClient;
+import org.apache.druid.java.util.common.DateTimes;
 import org.apache.druid.java.util.common.ISE;
 import org.apache.druid.msq.exec.Controller;
 import org.apache.druid.msq.exec.ControllerImpl;
+import org.apache.druid.msq.exec.QueryListener;
+import org.apache.druid.msq.exec.ResultsContext;
 import org.apache.druid.msq.exec.WorkerMemoryParameters;
 import org.apache.druid.msq.indexing.MSQControllerTask;
-import org.apache.druid.msq.indexing.MSQSpec;
+import org.apache.druid.msq.indexing.destination.MSQDestination;
+import org.apache.druid.msq.indexing.report.MSQResultsReport;
+import org.apache.druid.msq.indexing.report.MSQStatusReport;
 import org.apache.druid.msq.indexing.report.MSQTaskReport;
+import org.apache.druid.msq.indexing.report.MSQTaskReportPayload;
+import org.apache.druid.rpc.indexing.NoopOverlordClient;
+import org.joda.time.DateTime;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class MSQTestOverlordServiceClient extends NoopOverlordClient
@@ -46,55 +62,83 @@ public class MSQTestOverlordServiceClient extends NoopOverlordClient
   private final ObjectMapper objectMapper;
   private final TaskActionClient taskActionClient;
   private final WorkerMemoryParameters workerMemoryParameters;
-  private Map<String, Controller> inMemoryControllers = new HashMap<>();
-  private Map<String, Map<String, TaskReport>> reports = new HashMap<>();
-  private Map<String, MSQSpec> msqSpec = new HashMap<>();
+  private final List<ImmutableSegmentLoadInfo> loadedSegmentMetadata;
+  private final Map<String, Controller> inMemoryControllers = new HashMap<>();
+  private final Map<String, TaskReport.ReportMap> reports = new HashMap<>();
+  private final Map<String, MSQControllerTask> inMemoryControllerTask = new HashMap<>();
+  private final Map<String, TaskStatus> inMemoryTaskStatus = new HashMap<>();
+
+  public static final DateTime CREATED_TIME = DateTimes.of("2023-05-31T12:00Z");
+  public static final DateTime QUEUE_INSERTION_TIME = DateTimes.of("2023-05-31T12:01Z");
+
+  public static final long DURATION = 100L;
 
   public MSQTestOverlordServiceClient(
       ObjectMapper objectMapper,
       Injector injector,
       TaskActionClient taskActionClient,
-      WorkerMemoryParameters workerMemoryParameters
+      WorkerMemoryParameters workerMemoryParameters,
+      List<ImmutableSegmentLoadInfo> loadedSegmentMetadata
   )
   {
     this.objectMapper = objectMapper;
     this.injector = injector;
     this.taskActionClient = taskActionClient;
     this.workerMemoryParameters = workerMemoryParameters;
+    this.loadedSegmentMetadata = loadedSegmentMetadata;
   }
 
   @Override
   public ListenableFuture<Void> runTask(String taskId, Object taskObject)
   {
+    TestQueryListener queryListener = null;
     ControllerImpl controller = null;
-    MSQTestControllerContext msqTestControllerContext = null;
+    MSQTestControllerContext msqTestControllerContext;
     try {
+      MSQControllerTask cTask = objectMapper.convertValue(taskObject, MSQControllerTask.class);
+
       msqTestControllerContext = new MSQTestControllerContext(
           objectMapper,
           injector,
           taskActionClient,
-          workerMemoryParameters
+          workerMemoryParameters,
+          loadedSegmentMetadata,
+          cTask.getTaskLockType(),
+          cTask.getQuerySpec().getQuery().context()
       );
 
-      MSQControllerTask cTask = objectMapper.convertValue(taskObject, MSQControllerTask.class);
-      msqSpec.put(cTask.getId(), cTask.getQuerySpec());
+      inMemoryControllerTask.put(cTask.getId(), cTask);
 
       controller = new ControllerImpl(
-          cTask,
+          cTask.getId(),
+          cTask.getQuerySpec(),
+          new ResultsContext(cTask.getSqlTypeNames(), cTask.getSqlResultsContext()),
           msqTestControllerContext
       );
 
-      inMemoryControllers.put(cTask.getId(), controller);
+      inMemoryControllers.put(controller.queryId(), controller);
 
-      controller.run();
+      queryListener =
+          new TestQueryListener(
+              cTask.getId(),
+              cTask.getQuerySpec().getDestination()
+          );
+
+      try {
+        controller.run(queryListener);
+        inMemoryTaskStatus.put(taskId, queryListener.getStatusReport().toTaskStatus(cTask.getId()));
+      }
+      catch (Exception e) {
+        inMemoryTaskStatus.put(taskId, TaskStatus.failure(cTask.getId(), e.toString()));
+      }
       return Futures.immediateFuture(null);
     }
     catch (Exception e) {
       throw new ISE(e, "Unable to run");
     }
     finally {
-      if (controller != null && msqTestControllerContext != null) {
-        reports.put(controller.id(), msqTestControllerContext.getAllReports());
+      if (controller != null && queryListener != null) {
+        reports.put(controller.queryId(), queryListener.getReportMap());
       }
     }
   }
@@ -102,32 +146,148 @@ public class MSQTestOverlordServiceClient extends NoopOverlordClient
   @Override
   public ListenableFuture<Void> cancelTask(String taskId)
   {
-    inMemoryControllers.get(taskId).stopGracefully();
+    inMemoryControllers.get(taskId).stop();
     return Futures.immediateFuture(null);
   }
 
   @Override
-  public ListenableFuture<Map<String, Object>> taskReportAsMap(String taskId)
+  public ListenableFuture<TaskReport.ReportMap> taskReportAsMap(String taskId)
   {
-    SettableFuture<Map<String, Object>> future = SettableFuture.create();
-    future.set(
-        ImmutableMap.of(
-            MSQTaskReport.REPORT_KEY,
-            getReportForTask(taskId).get(MSQTaskReport.REPORT_KEY)
-        ));
+    return Futures.immediateFuture(getReportForTask(taskId));
+  }
+
+  @Override
+  public ListenableFuture<TaskPayloadResponse> taskPayload(String taskId)
+  {
+    SettableFuture<TaskPayloadResponse> future = SettableFuture.create();
+    future.set(new TaskPayloadResponse(taskId, getMSQControllerTask(taskId)));
+    return future;
+  }
+
+  @Override
+  public ListenableFuture<TaskStatusResponse> taskStatus(String taskId)
+  {
+    SettableFuture<TaskStatusResponse> future = SettableFuture.create();
+    TaskStatus taskStatus = inMemoryTaskStatus.get(taskId);
+    future.set(new TaskStatusResponse(taskId, new TaskStatusPlus(
+        taskId,
+        null,
+        MSQControllerTask.TYPE,
+        CREATED_TIME,
+        QUEUE_INSERTION_TIME,
+        taskStatus.getStatusCode(),
+        null,
+        DURATION,
+        taskStatus.getLocation(),
+        null,
+        taskStatus.getErrorMsg()
+    )));
+
     return future;
   }
 
   // hooks to pull stuff out for testing
   @Nullable
-  Map<String, TaskReport> getReportForTask(String id)
+  public TaskReport.ReportMap getReportForTask(String id)
   {
     return reports.get(id);
   }
 
   @Nullable
-  MSQSpec getQuerySpecForTask(String id)
+  MSQControllerTask getMSQControllerTask(String id)
   {
-    return msqSpec.get(id);
+    return inMemoryControllerTask.get(id);
+  }
+
+  /**
+   * Listener that captures a report and makes it available through {@link #getReportMap()}.
+   */
+  static class TestQueryListener implements QueryListener
+  {
+    private final String taskId;
+    private final MSQDestination destination;
+    private final List<Object[]> results = new ArrayList<>();
+
+    private List<MSQResultsReport.ColumnAndType> signature;
+    private List<SqlTypeName> sqlTypeNames;
+    private boolean resultsTruncated = true;
+    private TaskReport.ReportMap reportMap;
+
+    public TestQueryListener(final String taskId, final MSQDestination destination)
+    {
+      this.taskId = taskId;
+      this.destination = destination;
+    }
+
+    @Override
+    public boolean readResults()
+    {
+      return destination.getRowsInTaskReport() == MSQDestination.UNLIMITED || destination.getRowsInTaskReport() > 0;
+    }
+
+    @Override
+    public void onResultsStart(List<MSQResultsReport.ColumnAndType> signature, @Nullable List<SqlTypeName> sqlTypeNames)
+    {
+      this.signature = signature;
+      this.sqlTypeNames = sqlTypeNames;
+    }
+
+    @Override
+    public boolean onResultRow(Object[] row)
+    {
+      if (destination.getRowsInTaskReport() == MSQDestination.UNLIMITED
+          || results.size() < destination.getRowsInTaskReport()) {
+        results.add(row);
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    @Override
+    public void onResultsComplete()
+    {
+      resultsTruncated = false;
+    }
+
+    @Override
+    public void onQueryComplete(MSQTaskReportPayload report)
+    {
+      final MSQResultsReport resultsReport;
+
+      if (signature != null) {
+        resultsReport = new MSQResultsReport(
+            signature,
+            sqlTypeNames,
+            results,
+            resultsTruncated
+        );
+      } else {
+        resultsReport = null;
+      }
+
+      final MSQTaskReport taskReport = new MSQTaskReport(
+          taskId,
+          new MSQTaskReportPayload(
+              report.getStatus(),
+              report.getStages(),
+              report.getCounters(),
+              resultsReport
+          )
+      );
+
+      reportMap = TaskReport.buildTaskReports(taskReport);
+    }
+
+    public TaskReport.ReportMap getReportMap()
+    {
+      return Preconditions.checkNotNull(reportMap, "reportMap");
+    }
+
+    public MSQStatusReport getStatusReport()
+    {
+      final MSQTaskReport taskReport = (MSQTaskReport) Iterables.getOnlyElement(getReportMap().values());
+      return taskReport.getPayload().getStatus();
+    }
   }
 }

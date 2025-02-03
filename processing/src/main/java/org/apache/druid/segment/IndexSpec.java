@@ -38,12 +38,12 @@ import java.util.Objects;
 /**
  * IndexSpec defines segment storage format options to be used at indexing time,
  * such as bitmap type, and column compression formats.
- *
+ * <p>
  * IndexSpec is specified as part of the TuningConfig for the corresponding index task.
  */
 public class IndexSpec
 {
-  public static IndexSpec DEFAULT = IndexSpec.builder().build();
+  public static final IndexSpec DEFAULT = IndexSpec.builder().build();
 
   public static Builder builder()
   {
@@ -55,34 +55,28 @@ public class IndexSpec
   private final StringEncodingStrategy stringDictionaryEncoding;
   private final CompressionStrategy metricCompression;
   private final CompressionFactory.LongEncodingStrategy longEncoding;
-
+  @Nullable
+  private final CompressionStrategy complexMetricCompression;
   @Nullable
   private final CompressionStrategy jsonCompression;
-
   @Nullable
   private final SegmentizerFactory segmentLoader;
 
   /**
    * Creates an IndexSpec with the given storage format settings.
    *
-   *
-   * @param bitmapSerdeFactory type of bitmap to use (e.g. roaring or concise), null to use the default.
-   *                           Defaults to the bitmap type specified by the (deprecated) "druid.processing.bitmap.type"
-   *                           setting, or, if none was set, uses the default defined in {@link BitmapSerde}
-   *
-   * @param dimensionCompression compression format for dimension columns, null to use the default.
-   *                             Defaults to {@link CompressionStrategy#DEFAULT_COMPRESSION_STRATEGY}
-   *
+   * @param bitmapSerdeFactory       type of bitmap to use (e.g. roaring or concise), null to use the default.
+   *                                 Defaults to the bitmap type specified by the (deprecated) "druid.processing.bitmap.type"
+   *                                 setting, or, if none was set, uses the default defined in {@link BitmapSerde}
+   * @param dimensionCompression     compression format for dimension columns, null to use the default.
+   *                                 Defaults to {@link CompressionStrategy#DEFAULT_COMPRESSION_STRATEGY}
    * @param stringDictionaryEncoding encoding strategy for string dictionaries of dictionary encoded string columns
-   *
-   * @param metricCompression compression format for primitive type metric columns, null to use the default.
-   *                          Defaults to {@link CompressionStrategy#DEFAULT_COMPRESSION_STRATEGY}
-   *
-   * @param longEncoding encoding strategy for metric and dimension columns with type long, null to use the default.
-   *                     Defaults to {@link CompressionFactory#DEFAULT_LONG_ENCODING_STRATEGY}
-   *
-   * @param segmentLoader specify a {@link SegmentizerFactory} which will be written to 'factory.json' and used to load
-   *                      the written segment
+   * @param metricCompression        compression format for primitive type metric columns, null to use the default.
+   *                                 Defaults to {@link CompressionStrategy#DEFAULT_COMPRESSION_STRATEGY}
+   * @param longEncoding             encoding strategy for metric and dimension columns with type long, null to use the default.
+   *                                 Defaults to {@link CompressionFactory#DEFAULT_LONG_ENCODING_STRATEGY}
+   * @param segmentLoader            specify a {@link SegmentizerFactory} which will be written to 'factory.json' and used to load
+   *                                 the written segment
    */
   @JsonCreator
   public IndexSpec(
@@ -91,6 +85,7 @@ public class IndexSpec
       @JsonProperty("stringDictionaryEncoding") @Nullable StringEncodingStrategy stringDictionaryEncoding,
       @JsonProperty("metricCompression") @Nullable CompressionStrategy metricCompression,
       @JsonProperty("longEncoding") @Nullable CompressionFactory.LongEncodingStrategy longEncoding,
+      @JsonProperty("complexMetricCompression") @Nullable CompressionStrategy complexMetricCompression,
       @JsonProperty("jsonCompression") @Nullable CompressionStrategy jsonCompression,
       @JsonProperty("segmentLoader") @Nullable SegmentizerFactory segmentLoader
   )
@@ -108,6 +103,7 @@ public class IndexSpec
     this.metricCompression = metricCompression == null
                              ? CompressionStrategy.DEFAULT_COMPRESSION_STRATEGY
                              : metricCompression;
+    this.complexMetricCompression = complexMetricCompression;
     this.longEncoding = longEncoding == null
                         ? CompressionFactory.DEFAULT_LONG_ENCODING_STRATEGY
                         : longEncoding;
@@ -148,6 +144,14 @@ public class IndexSpec
   @JsonProperty
   @JsonInclude(JsonInclude.Include.NON_NULL)
   @Nullable
+  public CompressionStrategy getComplexMetricCompression()
+  {
+    return complexMetricCompression;
+  }
+
+  @JsonProperty
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  @Nullable
   public SegmentizerFactory getSegmentLoader()
   {
     return segmentLoader;
@@ -165,7 +169,7 @@ public class IndexSpec
   {
     return objectMapper.convertValue(
         this,
-        new TypeReference<Map<String, Object>>() {}
+        new TypeReference<>() {}
     );
   }
 
@@ -184,6 +188,7 @@ public class IndexSpec
            Objects.equals(stringDictionaryEncoding, indexSpec.stringDictionaryEncoding) &&
            metricCompression == indexSpec.metricCompression &&
            longEncoding == indexSpec.longEncoding &&
+           Objects.equals(complexMetricCompression, indexSpec.complexMetricCompression) &&
            Objects.equals(jsonCompression, indexSpec.jsonCompression) &&
            Objects.equals(segmentLoader, indexSpec.segmentLoader);
   }
@@ -191,7 +196,16 @@ public class IndexSpec
   @Override
   public int hashCode()
   {
-    return Objects.hash(bitmapSerdeFactory, dimensionCompression, stringDictionaryEncoding, metricCompression, longEncoding, jsonCompression, segmentLoader);
+    return Objects.hash(
+        bitmapSerdeFactory,
+        dimensionCompression,
+        stringDictionaryEncoding,
+        metricCompression,
+        longEncoding,
+        complexMetricCompression,
+        jsonCompression,
+        segmentLoader
+    );
   }
 
   @Override
@@ -203,6 +217,7 @@ public class IndexSpec
            ", stringDictionaryEncoding=" + stringDictionaryEncoding +
            ", metricCompression=" + metricCompression +
            ", longEncoding=" + longEncoding +
+           ", complexMetricCompression=" + complexMetricCompression +
            ", jsonCompression=" + jsonCompression +
            ", segmentLoader=" + segmentLoader +
            '}';
@@ -221,6 +236,8 @@ public class IndexSpec
     @Nullable
     private CompressionFactory.LongEncodingStrategy longEncoding;
     @Nullable
+    private CompressionStrategy complexMetricCompression;
+    @Nullable
     private CompressionStrategy jsonCompression;
     @Nullable
     private SegmentizerFactory segmentLoader;
@@ -236,6 +253,7 @@ public class IndexSpec
       this.dimensionCompression = dimensionCompression;
       return this;
     }
+
     public Builder withStringDictionaryEncoding(StringEncodingStrategy stringDictionaryEncoding)
     {
       this.stringDictionaryEncoding = stringDictionaryEncoding;
@@ -245,6 +263,12 @@ public class IndexSpec
     public Builder withMetricCompression(CompressionStrategy metricCompression)
     {
       this.metricCompression = metricCompression;
+      return this;
+    }
+
+    public Builder withComplexMetricCompression(CompressionStrategy complexMetricCompression)
+    {
+      this.complexMetricCompression = complexMetricCompression;
       return this;
     }
 
@@ -274,6 +298,7 @@ public class IndexSpec
           stringDictionaryEncoding,
           metricCompression,
           longEncoding,
+          complexMetricCompression,
           jsonCompression,
           segmentLoader
       );

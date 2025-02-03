@@ -99,9 +99,7 @@ public abstract class AbstractQueryResourceTestClient<QueryType>
     @Override
     public List<Map<String, Object>> decode(byte[] content) throws IOException
     {
-      return om.readValue(content, new TypeReference<List<Map<String, Object>>>()
-      {
-      });
+      return om.readValue(content, new TypeReference<>() {});
     }
   }
 
@@ -205,9 +203,15 @@ public abstract class AbstractQueryResourceTestClient<QueryType>
 
   public Future<StatusResponseHolder> queryAsync(String url, QueryType query)
   {
+    return queryAsync(url, query, null, null);
+  }
+
+  public Future<StatusResponseHolder> queryAsync(String url, QueryType query, String username, String password)
+  {
     try {
       Request request = new Request(HttpMethod.POST, new URL(url));
       request.setContent(MediaType.APPLICATION_JSON, encoderDecoderMap.get(MediaType.APPLICATION_JSON).encode(query));
+      request.setBasicAuthentication(username, password);
       return httpClient.go(
           request,
           StatusResponseHandler.getInstance()

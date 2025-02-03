@@ -26,11 +26,13 @@ import com.google.common.io.BaseEncoding;
 import com.google.common.primitives.Chars;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.druid.math.expr.Expr;
-import org.apache.druid.math.expr.ExprMacroTable;
-import org.apache.druid.math.expr.Parser;
+import org.apache.druid.math.expr.ExprEval;
+import org.apache.druid.math.expr.ExprType;
+import org.apache.druid.math.expr.ExpressionType;
 import org.apache.druid.segment.VirtualColumn;
 import org.apache.druid.segment.column.ColumnType;
 import org.apache.druid.segment.virtual.ExpressionVirtualColumn;
+import org.apache.druid.sql.calcite.planner.ExpressionParser;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -48,7 +50,7 @@ import java.util.function.Function;
  *
  * When added to {@link org.apache.druid.sql.calcite.rel.VirtualColumnRegistry} whenever used by projections, filters,
  * aggregators, or other query components, these will be converted into native virtual columns using
- * {@link #toVirtualColumn(String, ColumnType, ExprMacroTable)}
+ * {@link #toVirtualColumn(String, ColumnType, ExpressionParser)}
  *
  * Approximate expression structure is retained in the {@link #arguments}, which when fed into the
  * {@link ExpressionGenerator} that all {@link DruidExpression} must be created with will produce the final String
@@ -179,6 +181,19 @@ public class DruidExpression
         Collections.emptyList(),
         null
     );
+  }
+
+  /**
+   * Create a literal expression from an {@link ExprEval}.
+   */
+  public static DruidExpression ofLiteral(final DruidLiteral literal)
+  {
+    if (literal.type() != null && literal.type().is(ExprType.STRING)) {
+      return ofStringLiteral((String) literal.value());
+    } else {
+      final ColumnType evalColumnType = literal.type() != null ? ExpressionType.toColumnType(literal.type()) : null;
+      return ofLiteral(evalColumnType, ExprEval.ofType(literal.type(), literal.value()).toExpr().stringify());
+    }
   }
 
   public static DruidExpression ofStringLiteral(final String s)
@@ -367,6 +382,11 @@ public class DruidExpression
     return Preconditions.checkNotNull(simpleExtraction);
   }
 
+  public boolean isArray()
+  {
+    return druidType != null && druidType.isArray();
+  }
+
   /**
    * Get sub {@link DruidExpression} arguments of this expression
    */
@@ -375,30 +395,22 @@ public class DruidExpression
     return arguments;
   }
 
-  /**
-   * Compile the {@link DruidExpression} into a string and parse it into a native Druid {@link Expr}
-   */
-  public Expr parse(final ExprMacroTable macroTable)
-  {
-    return Parser.parse(expression.get(), macroTable);
-  }
-
   public VirtualColumn toVirtualColumn(
       final String name,
       final ColumnType outputType,
-      final ExprMacroTable macroTable
+      final ExpressionParser parser
   )
   {
-    return virtualColumnCreator.create(name, outputType, expression.get(), macroTable);
+    return virtualColumnCreator.create(name, outputType, expression.get(), parser);
   }
 
   public VirtualColumn toExpressionVirtualColumn(
       final String name,
       final ColumnType outputType,
-      final ExprMacroTable macroTable
+      final ExpressionParser parser
   )
   {
-    return DEFAULT_VIRTUAL_COLUMN_BUILDER.create(name, outputType, expression.get(), macroTable);
+    return DEFAULT_VIRTUAL_COLUMN_BUILDER.create(name, outputType, expression.get(), parser);
   }
 
   public NodeType getType()
@@ -413,7 +425,7 @@ public class DruidExpression
    * supplied by other means.
    *
    * This value is not currently used other than for tracking the types of the {@link DruidExpression} tree. The
-   * value passed to {@link #toVirtualColumn(String, ColumnType, ExprMacroTable)} will instead be whatever type "hint"
+   * value passed to {@link #toVirtualColumn(String, ColumnType, ExpressionParser)} will instead be whatever type "hint"
    * was specified when the expression was added to the {@link org.apache.druid.sql.calcite.rel.VirtualColumnRegistry}.
    */
   @Nullable
@@ -597,15 +609,15 @@ public class DruidExpression
   @FunctionalInterface
   public interface VirtualColumnCreator
   {
-    VirtualColumn create(String name, ColumnType outputType, String expression, ExprMacroTable macroTable);
+    VirtualColumn create(String name, ColumnType outputType, String expression, ExpressionParser parser);
   }
 
   public static class ExpressionVirtualColumnCreator implements VirtualColumnCreator
   {
     @Override
-    public VirtualColumn create(String name, ColumnType outputType, String expression, ExprMacroTable macroTable)
+    public VirtualColumn create(String name, ColumnType outputType, String expression, ExpressionParser parser)
     {
-      return new ExpressionVirtualColumn(name, expression, outputType, macroTable);
+      return new ExpressionVirtualColumn(name, expression, parser.parse(expression), outputType);
     }
   }
 }

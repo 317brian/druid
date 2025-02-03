@@ -24,14 +24,14 @@ sidebar_label: Overview
   -->
 
 Loading data in Druid is called _ingestion_ or _indexing_. When you ingest data into Druid, Druid reads the data from
-your source system and stores it in data files called [_segments_](../design/architecture.md#datasources-and-segments).
+your source system and stores it in data files called [_segments_](../design/segments.md).
 In general, segment files contain a few million rows each.
 
-For most ingestion methods, the Druid [MiddleManager](../design/middlemanager.md) processes or the
+For most ingestion methods, the Druid [Middle Manager](../design/middlemanager.md) processes or the
 [Indexer](../design/indexer.md) processes load your source data. The sole exception is Hadoop-based ingestion, which
 uses a Hadoop MapReduce job on YARN.
 
-During ingestion, Druid creates segments and stores them in [deep storage](../design/deep-storage.md). Historical nodes load the segments into memory to respond to queries. For streaming ingestion, the Middle Managers and indexers can respond to queries in real-time with arriving data. See the [Storage design](../design/architecture.md#storage-design) section of the Druid design documentation for more information.
+During ingestion, Druid creates segments and stores them in [deep storage](../design/deep-storage.md). Historical nodes load the segments into memory to respond to queries. For streaming ingestion, the Middle Managers and indexers can respond to queries in real-time with arriving data. For more information, see [Storage overview](../design/storage.md).
 
 This topic introduces streaming and batch ingestion methods. The following topics describe ingestion concepts and information that apply to all [ingestion methods](#ingestion-methods):
 
@@ -54,7 +54,7 @@ page.
 There are two available options for streaming ingestion. Streaming ingestion is controlled by a continuously-running
 supervisor.
 
-| **Method** | [Kafka](../development/extensions-core/kafka-ingestion.md) | [Kinesis](../development/extensions-core/kinesis-ingestion.md) |
+| **Method** | [Kafka](../ingestion/kafka-ingestion.md) | [Kinesis](../ingestion/kinesis-ingestion.md) |
 |---|-----|--------------|
 | **Supervisor type** | `kafka` | `kinesis`|
 | **How it works** | Druid reads directly from Apache Kafka. | Druid reads directly from Amazon Kinesis.|
@@ -69,7 +69,7 @@ runs for the duration of the job.
 | **Method** | [Native batch](./native-batch.md) | [SQL](../multi-stage-query/index.md) | [Hadoop-based](hadoop.md) |
 |---|-----|--------------|------------|
 | **Controller task type** | `index_parallel` | `query_controller` | `index_hadoop` |
-| **How you submit it** | Send an `index_parallel` spec to the [task API](../api-reference/api-reference.md#tasks). | Send an [INSERT](../multi-stage-query/concepts.md#insert) or [REPLACE](../multi-stage-query/concepts.md#replace) statement to the [SQL task API](../api-reference/sql-ingestion-api.md#submit-a-query). | Send an `index_hadoop` spec to the [task API](../api-reference/api-reference.md#tasks). |
+| **How you submit it** | Send an `index_parallel` spec to the [Tasks API](../api-reference/tasks-api.md). | Send an [INSERT](../multi-stage-query/concepts.md#insert) or [REPLACE](../multi-stage-query/concepts.md#replace) statement to the [SQL task API](../api-reference/sql-ingestion-api.md#submit-a-query). | Send an `index_hadoop` spec to the [Tasks API](../api-reference/tasks-api.md). |
 | **Parallelism** | Using subtasks, if [`maxNumConcurrentSubTasks`](native-batch.md#tuningconfig) is greater than 1. | Using `query_worker` subtasks. | Using YARN. |
 | **Fault tolerance** | Workers automatically relaunched upon failure. Controller task failure leads to job failure. | Controller or worker task failure leads to job failure. | YARN containers automatically relaunched upon failure. Controller task failure leads to job failure. |
 | **Can append?** | Yes. | Yes (INSERT). | No. |

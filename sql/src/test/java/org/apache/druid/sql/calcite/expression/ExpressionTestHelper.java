@@ -35,8 +35,6 @@ import org.apache.druid.data.input.MapBasedRow;
 import org.apache.druid.math.expr.Expr;
 import org.apache.druid.math.expr.ExprEval;
 import org.apache.druid.math.expr.ExpressionType;
-import org.apache.druid.math.expr.Parser;
-import org.apache.druid.query.expression.TestExprMacroTable;
 import org.apache.druid.query.filter.DimFilter;
 import org.apache.druid.query.filter.ValueMatcher;
 import org.apache.druid.segment.RowAdapters;
@@ -51,6 +49,7 @@ import org.apache.druid.sql.calcite.planner.CalciteRulesManager;
 import org.apache.druid.sql.calcite.planner.Calcites;
 import org.apache.druid.sql.calcite.planner.CatalogResolver;
 import org.apache.druid.sql.calcite.planner.DruidTypeSystem;
+import org.apache.druid.sql.calcite.planner.ExpressionParserImpl;
 import org.apache.druid.sql.calcite.planner.PlannerConfig;
 import org.apache.druid.sql.calcite.planner.PlannerContext;
 import org.apache.druid.sql.calcite.planner.PlannerToolbox;
@@ -63,6 +62,7 @@ import org.apache.druid.sql.calcite.schema.ViewSchema;
 import org.apache.druid.sql.calcite.table.RowSignatures;
 import org.apache.druid.sql.calcite.util.CalciteTestBase;
 import org.apache.druid.sql.calcite.util.CalciteTests;
+import org.apache.druid.sql.hook.DruidHookDispatcher;
 import org.easymock.EasyMock;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -78,7 +78,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-class ExpressionTestHelper
+public class ExpressionTestHelper
 {
   private static final JoinableFactoryWrapper JOINABLE_FACTORY_WRAPPER = CalciteTests.createJoinableFactoryWrapper();
   private static final PlannerToolbox PLANNER_TOOLBOX = new PlannerToolbox(
@@ -98,9 +98,10 @@ class ExpressionTestHelper
       "druid",
       new CalciteRulesManager(ImmutableSet.of()),
       CalciteTests.TEST_AUTHORIZER_MAPPER,
-      AuthConfig.newBuilder().build()
+      AuthConfig.newBuilder().build(),
+      new DruidHookDispatcher()
   );
-  private static final PlannerContext PLANNER_CONTEXT = PlannerContext.create(
+  public static final PlannerContext PLANNER_CONTEXT = PlannerContext.create(
       PLANNER_TOOLBOX,
       "SELECT 1", // The actual query isn't important for this test
       null, /* Don't need engine */
@@ -336,8 +337,9 @@ class ExpressionTestHelper
       Assert.assertEquals("Expression for: " + rexNode, expectedExpression.getExpression(), expression.getExpression());
     }
 
-    ExprEval<?> result = Parser.parse(expression.getExpression(), PLANNER_CONTEXT.getExprMacroTable())
-                               .eval(expressionBindings);
+    ExprEval<?> result = PLANNER_CONTEXT.parseExpression(expression.getExpression())
+
+                                        .eval(expressionBindings);
 
     Assert.assertEquals("Result for: " + rexNode, expectedResult, result.value());
   }
@@ -351,7 +353,11 @@ class ExpressionTestHelper
   )
   {
     final RexNode rexNode = rexBuilder.makeCall(op, exprs);
-    final VirtualColumnRegistry virtualColumnRegistry = VirtualColumnRegistry.create(rowSignature, TestExprMacroTable.INSTANCE, false);
+    final VirtualColumnRegistry virtualColumnRegistry = VirtualColumnRegistry.create(
+        rowSignature,
+        new ExpressionParserImpl(PLANNER_TOOLBOX.exprMacroTable()),
+        false
+    );
 
     final DimFilter filter = Expressions.toFilter(PLANNER_CONTEXT, rowSignature, virtualColumnRegistry, rexNode);
     Assert.assertEquals("Filter for: " + rexNode, expectedFilter, filter);
@@ -385,6 +391,6 @@ class ExpressionTestHelper
         )
     );
 
-    Assert.assertEquals("Result for: " + rexNode, expectedResult, matcher.matches());
+    Assert.assertEquals("Result for: " + rexNode, expectedResult, matcher.matches(false));
   }
 }

@@ -16,8 +16,6 @@
  * limitations under the License.
  */
 
-import React from 'react';
-
 import { EXECUTION_INGEST_ERROR } from '../../../druid-models/execution/execution-ingest-error.mock';
 import { shallow } from '../../../utils/shallow-renderer';
 
@@ -26,7 +24,7 @@ import { ExecutionDetailsPane } from './execution-details-pane';
 describe('ExecutionDetailsPane', () => {
   it('matches snapshot no init tab', () => {
     const comp = shallow(
-      <ExecutionDetailsPane execution={EXECUTION_INGEST_ERROR} goToIngestion={() => {}} />,
+      <ExecutionDetailsPane execution={EXECUTION_INGEST_ERROR} goToTask={() => {}} />,
     );
 
     expect(comp).toMatchSnapshot();
@@ -37,7 +35,7 @@ describe('ExecutionDetailsPane', () => {
       <ExecutionDetailsPane
         execution={EXECUTION_INGEST_ERROR}
         initTab="warnings"
-        goToIngestion={() => {}}
+        goToTask={() => {}}
       />,
     );
 

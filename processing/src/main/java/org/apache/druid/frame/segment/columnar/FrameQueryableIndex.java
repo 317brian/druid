@@ -24,6 +24,7 @@ import org.apache.druid.collections.bitmap.RoaringBitmapFactory;
 import org.apache.druid.frame.Frame;
 import org.apache.druid.frame.FrameType;
 import org.apache.druid.frame.read.columnar.FrameColumnReader;
+import org.apache.druid.query.OrderBy;
 import org.apache.druid.segment.DimensionHandler;
 import org.apache.druid.segment.Metadata;
 import org.apache.druid.segment.QueryableIndex;
@@ -42,7 +43,7 @@ import java.util.Map;
  * A {@link QueryableIndex} implementation based on a single columnar {@link Frame}. There is no internal caching
  * of columns here, so callers should generally wrap this in a {@link org.apache.druid.segment.ColumnCache}.
  *
- * This class exists so {@link FrameCursorFactory} can reuse code meant for regular segment-backed
+ * This class exists so {@link ColumnarFrameCursorFactory} can reuse code meant for regular segment-backed
  * {@link QueryableIndex}. Some methods are implemented by throwing {@link UnsupportedOperationException}, wherever
  * it is not expected that those methods are actually going to be needed.
  */
@@ -52,7 +53,7 @@ public class FrameQueryableIndex implements QueryableIndex
   private final RowSignature signature;
   private final List<FrameColumnReader> columnReaders;
 
-  FrameQueryableIndex(
+  public FrameQueryableIndex(
       final Frame frame,
       final RowSignature signature,
       final List<FrameColumnReader> columnReaders
@@ -98,6 +99,12 @@ public class FrameQueryableIndex implements QueryableIndex
   public Indexed<String> getAvailableDimensions()
   {
     return new ListIndexed<>(signature.getColumnNames());
+  }
+
+  @Override
+  public List<OrderBy> getOrdering()
+  {
+    return Collections.emptyList();
   }
 
   @Override

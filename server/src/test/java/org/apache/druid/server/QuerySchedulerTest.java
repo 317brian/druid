@@ -31,6 +31,7 @@ import com.google.inject.Injector;
 import com.google.inject.Key;
 import com.google.inject.ProvisionException;
 import org.apache.druid.client.SegmentServerSelector;
+import org.apache.druid.error.ExceptionMatcher;
 import org.apache.druid.guice.GuiceInjectors;
 import org.apache.druid.guice.JsonConfigProvider;
 import org.apache.druid.guice.JsonConfigurator;
@@ -47,7 +48,7 @@ import org.apache.druid.java.util.common.guava.Yielder;
 import org.apache.druid.java.util.common.guava.Yielders;
 import org.apache.druid.java.util.emitter.core.NoopEmitter;
 import org.apache.druid.java.util.emitter.service.ServiceEmitter;
-import org.apache.druid.query.FluentQueryRunnerBuilder;
+import org.apache.druid.query.FluentQueryRunner;
 import org.apache.druid.query.Query;
 import org.apache.druid.query.QueryCapacityExceededException;
 import org.apache.druid.query.QueryPlus;
@@ -58,9 +59,9 @@ import org.apache.druid.query.dimension.DefaultDimensionSpec;
 import org.apache.druid.query.groupby.GroupByQuery;
 import org.apache.druid.query.groupby.GroupByQueryConfig;
 import org.apache.druid.query.groupby.GroupByQueryRunnerTest;
+import org.apache.druid.query.groupby.GroupByQueryRunnerTestHelper;
 import org.apache.druid.query.groupby.ResultRow;
 import org.apache.druid.query.groupby.having.HavingSpec;
-import org.apache.druid.query.groupby.strategy.GroupByStrategySelector;
 import org.apache.druid.query.topn.TopNQuery;
 import org.apache.druid.query.topn.TopNQueryBuilder;
 import org.apache.druid.server.initialization.ServerConfig;
@@ -68,6 +69,7 @@ import org.apache.druid.server.scheduling.HiLoQueryLaningStrategy;
 import org.apache.druid.server.scheduling.ManualQueryPrioritizationStrategy;
 import org.apache.druid.server.scheduling.NoQueryLaningStrategy;
 import org.easymock.EasyMock;
+import org.hamcrest.text.StringContainsInOrder;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -89,6 +91,8 @@ public class QuerySchedulerTest
   private static final int NUM_ROWS = 10000;
   private static final int TEST_HI_CAPACITY = 5;
   private static final int TEST_LO_CAPACITY = 2;
+  private static final ServerConfig SERVER_CONFIG_WITHOUT_TOTAL = new ServerConfig();
+  private static final ServerConfig SERVER_CONFIG_WITH_TOTAL = new ServerConfig(false);
 
   private ListeningExecutorService executorService;
   private ObservableQueryScheduler scheduler;
@@ -103,7 +107,8 @@ public class QuerySchedulerTest
         TEST_HI_CAPACITY,
         ManualQueryPrioritizationStrategy.INSTANCE,
         new HiLoQueryLaningStrategy(40),
-        new ServerConfig()
+        // Test with total laning turned on
+        SERVER_CONFIG_WITH_TOTAL
     );
   }
 
@@ -339,7 +344,7 @@ public class QuerySchedulerTest
         0,
         ManualQueryPrioritizationStrategy.INSTANCE,
         new NoQueryLaningStrategy(),
-        new ServerConfig()
+        SERVER_CONFIG_WITHOUT_TOTAL
     );
     List<Future<?>> futures = new ArrayList<>(NUM_QUERIES);
     for (int i = 0; i < NUM_QUERIES; i++) {
@@ -349,23 +354,44 @@ public class QuerySchedulerTest
   }
 
   @Test
+  public void testTotalLimitWithoutQueryQueuing()
+  {
+    ServerConfig serverConfig = SERVER_CONFIG_WITH_TOTAL;
+    QueryScheduler queryScheduler = new QueryScheduler(
+        serverConfig.getNumThreads() - 1,
+        ManualQueryPrioritizationStrategy.INSTANCE,
+        new NoQueryLaningStrategy(),
+        serverConfig
+    );
+    Assert.assertEquals(serverConfig.getNumThreads() - 1, queryScheduler.getTotalAvailableCapacity());
+  }
+
+  @Test
+  public void testTotalLimitWithQueryQueuing()
+  {
+    ServerConfig serverConfig = SERVER_CONFIG_WITHOUT_TOTAL;
+    QueryScheduler queryScheduler = new QueryScheduler(
+        serverConfig.getNumThreads() - 1,
+        ManualQueryPrioritizationStrategy.INSTANCE,
+        new NoQueryLaningStrategy(),
+        serverConfig
+    );
+    Assert.assertEquals(-1, queryScheduler.getTotalAvailableCapacity());
+  }
+
+  @Test
   public void testExplodingWrapperDoesNotLeakLocks()
   {
     scheduler = new ObservableQueryScheduler(
         5,
         ManualQueryPrioritizationStrategy.INSTANCE,
         new NoQueryLaningStrategy(),
-        new ServerConfig()
+        SERVER_CONFIG_WITH_TOTAL
     );
 
     QueryRunnerFactory factory = GroupByQueryRunnerTest.makeQueryRunnerFactory(
         new GroupByQueryConfig()
         {
-          @Override
-          public String getDefaultStrategy()
-          {
-            return GroupByStrategySelector.STRATEGY_V2;
-          }
 
           @Override
           public String toString()
@@ -468,16 +494,14 @@ public class QuerySchedulerTest
     final Properties properties = new Properties();
     properties.setProperty(propertyPrefix + ".laning.strategy", "hilo");
     provider.inject(properties, injector.getInstance(JsonConfigurator.class));
-    Throwable t = Assert.assertThrows(ProvisionException.class, () -> provider.get().get());
-    Assert.assertEquals(
-        "Unable to provision, see the following errors:\n"
-        + "\n"
-        + "1) Problem parsing object at prefix[druid.query.scheduler]: Cannot construct instance of `org.apache.druid.server.scheduling.HiLoQueryLaningStrategy`, problem: maxLowPercent must be set\n"
-        + " at [Source: UNKNOWN; line: -1, column: -1] (through reference chain: org.apache.druid.server.QuerySchedulerProvider[\"laning\"]).\n"
-        + "\n"
-        + "1 error",
-        t.getMessage()
-    );
+    ExceptionMatcher
+        .of(ProvisionException.class)
+        .expectMessage(
+            new StringContainsInOrder(List.of(
+                "Problem parsing object at prefix[druid.query.scheduler]:",
+                "problem: maxLowPercent must be set"
+            ))
+      );
   }
 
   @Test
@@ -526,15 +550,14 @@ public class QuerySchedulerTest
     properties.setProperty(propertyPrefix + ".prioritization.strategy", "threshold");
     provider.inject(properties, injector.getInstance(JsonConfigurator.class));
     Throwable t = Assert.assertThrows(ProvisionException.class, () -> provider.get().get());
-    Assert.assertEquals(
-        "Unable to provision, see the following errors:\n"
-        + "\n"
-        + "1) Problem parsing object at prefix[druid.query.scheduler]: Cannot construct instance of `org.apache.druid.server.scheduling.ThresholdBasedQueryPrioritizationStrategy`, problem: periodThreshold, durationThreshold, or segmentCountThreshold must be set\n"
-        + " at [Source: UNKNOWN; line: -1, column: -1] (through reference chain: org.apache.druid.server.QuerySchedulerProvider[\"prioritization\"]).\n"
-        + "\n"
-        + "1 error",
-        t.getMessage()
-    );
+    ExceptionMatcher
+        .of(ProvisionException.class)
+        .expectMessage(
+            new StringContainsInOrder(List.of(
+                "Problem parsing object at prefix[druid.query.scheduler]:",
+                "problem: periodThreshold, durationThreshold, segmentCountThreshold or segmentRangeThreshold must be set"
+            ))
+      );
   }
 
 
@@ -648,7 +671,7 @@ public class QuerySchedulerTest
             @Override
             public Iterator<Integer> make()
             {
-              return new Iterator<Integer>()
+              return new Iterator<>()
               {
                 int rowCounter = 0;
 
@@ -681,12 +704,12 @@ public class QuerySchedulerTest
   {
     final int explodeAt = explodeAfter + 1;
     return new BaseSequence<>(
-        new BaseSequence.IteratorMaker<Integer, Iterator<Integer>>()
+        new BaseSequence.IteratorMaker<>()
         {
           @Override
           public Iterator<Integer> make()
           {
-            return new Iterator<Integer>()
+            return new Iterator<>()
             {
               int rowCounter = 0;
 
@@ -743,6 +766,7 @@ public class QuerySchedulerTest
     });
   }
 
+  @SuppressWarnings({"rawtypes", "unchecked"})
   private ListenableFuture<?> makeMergingQueryFuture(
       ListeningExecutorService executorService,
       QueryScheduler scheduler,
@@ -757,14 +781,22 @@ public class QuerySchedulerTest
 
         Assert.assertNotNull(scheduled);
 
-        FluentQueryRunnerBuilder fluentQueryRunnerBuilder = new FluentQueryRunnerBuilder(toolChest);
-        FluentQueryRunnerBuilder.FluentQueryRunner runner = fluentQueryRunnerBuilder.create((queryPlus, responseContext) -> {
-          Sequence<Integer> underlyingSequence = makeSequence(numRows);
-          Sequence<Integer> results = scheduler.run(scheduled, underlyingSequence);
-          return results;
-        });
+        FluentQueryRunner runner = FluentQueryRunner
+            .create(
+                (queryPlus, responseContext) -> {
+                  Sequence<Integer> underlyingSequence = makeSequence(numRows);
+                  Sequence<Integer> results = scheduler.run(scheduled, underlyingSequence);
+                  return (Sequence) results;
+                },
+                toolChest
+            )
+            .applyPreMergeDecoration()
+            .mergeResults(true)
+            .applyPostMergeDecoration();
 
-        final int actualNumRows = consumeAndCloseSequence(runner.mergeResults().run(QueryPlus.wrap(query)));
+        final int actualNumRows = consumeAndCloseSequence(
+            runner.run(QueryPlus.wrap(GroupByQueryRunnerTestHelper.populateResourceId(query)))
+        );
         Assert.assertEquals(actualNumRows, numRows);
       }
       catch (IOException ex) {
@@ -832,7 +864,7 @@ public class QuerySchedulerTest
     Injector injector = GuiceInjectors.makeStartupInjectorWithModules(
         ImmutableList.of(
             binder -> {
-              binder.bind(ServerConfig.class).toInstance(new ServerConfig());
+              binder.bind(ServerConfig.class).toInstance(SERVER_CONFIG_WITH_TOTAL);
               binder.bind(ServiceEmitter.class).toInstance(new ServiceEmitter("test", "localhost", new NoopEmitter()));
               JsonConfigProvider.bind(binder, "druid.query.scheduler", QuerySchedulerProvider.class, Global.class);
             }
