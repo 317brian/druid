@@ -339,7 +339,7 @@ and in your sidecar specs:
 ```
 
 That will not work, because we cannot decipher what your command is, the extension needs to know it explicitly.
-**Even for sidecars like Istio which are dynamically created by the service mesh, this needs to happen.*
+Even for sidecars like Istio which are dynamically created by the service mesh, this needs to happen.
 
 Instead, do the following:
 You can keep your Dockerfile the same but you must have a sidecar spec like so:

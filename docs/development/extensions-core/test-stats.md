@@ -46,7 +46,7 @@ S.E. = sqrt{ p1 * ( 1 - p1 )/n1 + p2 * (1 - p2)/n2) }
 
 ### zscore2sample post aggregator
 
-* **`zscore2sample`**: calculate the z-score using two-sample z-test while converting binary variables (***e.g.*** success or not) to continuous variables (***e.g.*** conversion rate).
+* `zscore2sample`: calculate the z-score using two-sample z-test while converting binary variables (for example, success or not) to continuous variables (for example, conversion rate).
 
 ```json
 {
@@ -59,7 +59,7 @@ S.E. = sqrt{ p1 * ( 1 - p1 )/n1 + p2 * (1 - p2)/n2) }
 }
 ```
 
-Please note the post aggregator will be converting binary variables to continuous variables for two population proportions.  Specifically
+Please note the post aggregator will be converting binary variables to continuous variables for two population proportions.
 
 p1 = (successCount1) / (sample size 1)
 
@@ -67,8 +67,8 @@ p2 = (successCount2) / (sample size 2)
 
 ### pvalue2tailedZtest post aggregator
 
-* **`pvalue2tailedZtest`**: calculate p-value of two-sided z-test from zscore
-    - ***pvalue2tailedZtest(zscore)*** - the input is a z-score which can be calculated using the zscore2sample post aggregator
+* `pvalue2tailedZtest`: calculate p-value of two-sided z-test from zscore
+    - `pvalue2tailedZtest(zscore)` - the input is a z-score which can be calculated using the zscore2sample post aggregator
 
 
 ```json
