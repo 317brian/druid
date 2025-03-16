@@ -261,3 +261,5 @@ See the following topics for more information:
 ## Acknowledgments
 
 This tutorial is adapted from a [blog post](https://blog.hellmar-becker.de/2022/06/05/druid-data-cookbook-counting-unique-visitors-for-overlapping-segments/) by community member Hellmar Becker.
+
+---
