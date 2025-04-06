@@ -56,7 +56,7 @@ browser.
 3. Expand the wikipedia datasource tree in the left pane. We'll
 create a query for the page dimension.  
 
-4. Click `page` and then **Show:page** from the menu: 
+4. Click `page` and then **Show: page** from the menu: 
 
    ![Query select page](../assets/tutorial-query-02.png "Query select page")
 
