@@ -120,6 +120,7 @@ GoogleCloudStorageInputSource
 GSSAPI
 GUIs
 GroupBy
+gRPC
 Guice
 HDFS
 HLL
@@ -822,6 +823,7 @@ InvalidNullByte
 QueryNotSupported
 QueryNotSupported
 RowTooLarge
+tooltip
 TooManyBuckets
 TooManyInputFiles
 TooManyPartitions
