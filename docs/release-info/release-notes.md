@@ -549,7 +549,7 @@ Druid now defaults to v1 of the front-coded format instead of version 0 if enabl
 ### Developer notes
 
 - Added `typecheck` to `npm run test-unit` to ensure TypeScript typechecking happens on calls to `test-unit` [#19251](https://github.com/apache/druid/pull/19251)
-- Added a 14 day cooldown to dependabot updates to protect against not-yet-discovered regressions and security issues [#19241](https://github.com/apache/druid/pull/19241)
+- Added a 14 day cooldown to `dependabot` updates to protect against not-yet-discovered regressions and security issues [#19241](https://github.com/apache/druid/pull/19241)
 - Added `AGENTS.md` [#19084](https://github.com/apache/druid/pull/19084)
 - Added a requirement to use [conventional commit syntax](https://www.conventionalcommits.org/en/v1.0.0/) [#19089](https://github.com/apache/druid/pull/19089)
 - Updated `checkstyle` from `3.0.0` to `3.6.0` [#19064](https://github.com/apache/druid/pull/19064)
