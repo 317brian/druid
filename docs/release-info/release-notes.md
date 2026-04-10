@@ -89,11 +89,11 @@ POST /druid/coordinator/v1/config/broker
 
 ### Minor compaction for Overlord-based compaction (experimental)
 
-You can now configure minor compaction. With minor compaction, Druid only compacts newly ingested segments while upgrading existing compacted segments. When Druid upgrades segments, it updates the metadata instead of using resources to compact it again. Support is currently limited to Overlord-based compaction supervisors using the MSQ task engine.
+You can now configure minor compaction. With minor compaction, Druid only compacts newly ingested segments while upgrading existing compacted segments. When Druid upgrades segments, it updates the metadata instead of using resources to compact it again. You can use the native compaction engine or the  MSQ task engine.
 
 Use the `mostFragmentedFirst` compaction policy and set either a percentage of rows-based or byte-based threshold for minor compaction.
 
-[#19059](https://github.com/apache/druid/pull/19059) [#19205](https://github.com/apache/druid/pull/19205)
+[#19059](https://github.com/apache/druid/pull/19059) [#19205](https://github.com/apache/druid/pull/19205) [#19016](https://github.com/apache/druid/pull/19016)
 
 ### Thrift input format
 
@@ -176,6 +176,16 @@ consoleBrokerService: 'druid/BROKER_NAME'
 
 [#19069](https://github.com/apache/druid/pull/19069)
 
+### Consul extension
+
+The contributor extension `druid-consul-extensions` lets Druid clusters use Consul for service discovery and
+Coordinator/Overlord leader election instead of ZooKeeper. The extension supports ACLs, TLS/mTLS, and metrics. 
+
+Before you switch to Consul, you need to set
+`druid.serverview.type=http` and `druid.indexer.runner.type=httpRemote` cluster wide.
+
+[#18843](https://github.com/apache/druid/pull/18843)
+
 ## Functional area and related changes
 
 This section contains detailed release notes separated by areas.
@@ -184,6 +194,7 @@ This section contains detailed release notes separated by areas.
 
 #### Changed storage column displays
 
+- Improved the compaction config view to 
 - Renamed **Current size** to **Assigned size**.
 - Renamed **Max size** to **Effective size**. It now displays the smaller value between `max_size` and `storage_size`. The max size is still shown as a tooltip.
 - Changed usage calculation to use `effective_size`
@@ -200,6 +211,7 @@ This section contains detailed release notes separated by areas.
 - Added support for Dart reports [#18897](https://github.com/apache/druid/pull/18897)
 - Changed what's considered an active worker: any nonzero rows, files, bytes, frames, or wall time is enough to consider a worker active [#19183](https://github.com/apache/druid/pull/19183)
 - Changed the **Cancel query** option to show only if a query is in an accepted or running state [#19182](https://github.com/apache/druid/pull/19182)
+- Changed the ordering of the current Dart queries panel to show queries in the following order: RUNNING, ACCEPTED, and then COMPLETED. RUNNING and ACCEPTED queries are ordered by the most recent first (based on timestamp). COMPLETED queries are sorted by finish time [#19237](https://github.com/apache/druid/pull/19237)
 
 ### Ingestion
 
@@ -210,6 +222,7 @@ This section contains detailed release notes separated by areas.
 - Added support for virtual storage fabric when performing SQL-based ingestion [#18873](https://github.com/apache/druid/pull/18873)
 - Added support for `StorageMonitor` so that MSQ task engine tasks always emit `taskId` and `groupId` [#19048](https://github.com/apache/druid/pull/19048)
 - Improved worker cancellation [#18931](https://github.com/apache/druid/pull/18931)
+- Improved exception handling [#19234](https://github.com/apache/druid/pull/19234)
 
 #### Streaming ingestion
 
@@ -228,6 +241,7 @@ Added `serverPriorityToReplicas` parameter to the streaming supervisor specs (Ka
 ##### Other streaming ingestion improvements
 
 - Improved cost-based autoscaler performance in high lag scenarios [#19045](https://github.com/apache/druid/pull/19045)
+- Improved the performance of realtime task scheduling by ordering schedule requests by priority on the `TaskQueue` [#19203](https://github.com/apache/druid/pull/19203)
 
 
 #### Ingestion improvements
@@ -322,6 +336,7 @@ The algorithm for cost-based autoscaling has been changed:
 
 #### Other cluster management improvements
 
+- Added a `ReadOnly` authorizer that allows all READ operations but denies any other operation, such as WRITE [#19243](https://github.com/apache/druid/pull/19243)
 - Added `/status/ready` endpoint for service health so that external load balancers can handle a graceful shutdown better [#19148](https://github.com/apache/druid/pull/19148)
 - Added a configurable option to scale-down during task run time for cost-based autoscaler [#18958](https://github.com/apache/druid/pull/18958)
 - Added `storage_size` to `sys.servers` to facilitate retrieving disk cache size for Historicals when using the virtual storage fabric [#18979](https://github.com/apache/druid/pull/18979)
@@ -344,9 +359,17 @@ The new configuration property `druid.msq.intermediate.storage.cleaner.durationT
 
 #### Other data management improvements
 
+- Added the `druid.storage.transfer.asyncHttpClientType` config that specifies which async HTTP client to use for S3 transfers: `crt` for Amazon CRT or `netty` for Netty NIO [#19249](https://github.com/apache/druid/pull/19249)
+- Added a mechanism to automatically clean up intermediary files on HDFS storage [#19187](https://github.com/apache/druid/pull/19187)
 - Changed the default value for `druid.indexing.formats.maxStringLength` to null from 0 [#19198](https://github.com/apache/druid/pull/19198)
 
 ### Metrics and monitoring
+
+#### Version field
+
+All Druid metrics now include `version` and `buildRevision` fields to help you identify which version of Druid is emitting a metric. You can use this information to verify that all nodes in a cluster are running the intended revision during rolling deployments.
+
+[#19123](https://github.com/apache/druid/pull/19123)
 
 #### Monitoring supervisor state
 
@@ -386,8 +409,8 @@ Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSig
 - Added `queries` and `totalQueries` counters, which reflect queries made to realtime servers to get realtime data
 - Added `tier/storage/capacity` metric for the Coordinator to emit that is guaranteed to reflect the total `StorageLocation` size configured across all Historicals in a tier [#18962](https://github.com/apache/druid/pull/18962)
 - Added new metrics for virtual storage fabric to the MSQ task engine `ChannelCounters`: `loadBytes`, `loadTime`, `loadWait`, and `loadFiles` [#18971](https://github.com/apache/druid/pull/18971)
-- Added `storage/virtual/hit/bytes` metric to `StorageMonitor`
-[#18895](https://github.com/apache/druid/pull/18895)
+- Added `storage/virtual/hit/bytes`, `storage/virtual/hold/count` and `storage/virtual/hold/bytes` metric to `StorageMonitor`
+[#18895](https://github.com/apache/druid/pull/18895) [#19217](https://github.com/apache/druid/pull/19217)
 - Added `supervisorId` dimension for streaming tasks to `TaskCountStatsMonitor` [#18920](https://github.com/apache/druid/pull/18920)
 - Changed `StorageMonitor` to always be on [#19048](https://github.com/apache/druid/pull/19048)
 - Improved the metrics for autoscalers, so that they all emit the same metrics: `supervisorId`, `dataSource`, and `stream` [#19097](https://github.com/apache/druid/pull/19097)
@@ -401,6 +424,13 @@ The gRPC query extension now cancels in-flight queries when clients cancel or di
 [#19005](https://github.com/apache/druid/pull/19005)
 
 #### Iceberg 
+
+##### GCS warehouse
+
+The Iceberg input source now supports GCS warehouses. To use this feature, you need to load the `druid-google-extensions` extension in addition to the Iceberg extension.
+[#19137](https://github.com/apache/druid/pull/19137)
+
+##### Filters
 
 You can now configure residual filters for non-partition columns when using the Iceberg input source. Set `residualFilterMode` in the Iceberg input source to one of the following:
 
@@ -495,6 +525,15 @@ Segment locking and `NumberedOverwriteShardSpec` are deprecated and will be remo
 
 ### Incompatible changes
 
+#### Removed `ParseSpec` and deprecated parsers
+
+The Parser for native batch tasks and streaming ingestion indexing services has been removed. Where possible, use the input format instead. Note that `JavascriptParseSpec` and `JSONLowercaseParseSpec` have no InputFormat equivalents. 
+
+Druid supports custom text data formats and can use the Regex input format to parse them. However, be aware doing this to
+parse data is less efficient than writing a native Java `InputFormat` extension, or using an external stream processor. We welcome contributions of new input formats.
+
+[#19239](https://github.com/apache/druid/pull/19239)
+
 #### Removed `defaultProcessingRate` config
 
 This config allowed scaling actions to begin prior to the first metrics becoming available. 
@@ -509,6 +548,8 @@ Druid now defaults to v1 of the front-coded format instead of version 0 if enabl
 
 ### Developer notes
 
+- Added `typecheck` to `npm run test-unit` to ensure TypeScript typechecking happens on calls to `test-unit` [#19251](https://github.com/apache/druid/pull/19251)
+- Added a 14 day cooldown to dependabot updates to protect against not-yet-discovered regressions and security issues [#19241](https://github.com/apache/druid/pull/19241)
 - Added `AGENTS.md` [#19084](https://github.com/apache/druid/pull/19084)
 - Added a requirement to use [conventional commit syntax](https://www.conventionalcommits.org/en/v1.0.0/) [#19089](https://github.com/apache/druid/pull/19089)
 - Updated `checkstyle` from `3.0.0` to `3.6.0` [#19064](https://github.com/apache/druid/pull/19064)
@@ -542,3 +583,25 @@ The following dependencies have been updated:
 - `com.lmax.disruptor` from `3.3.6` to `3.4.4` [#19122](https://github.com/apache/druid/pull/19122)
 - `org.junit.junit-bom` from `5.13.3` to `5.14.3` [#19122](https://github.com/apache/druid/pull/19122)
 - Several Kubernetes related dependencies have been updated. For more information, see [#19071](https://github.com/apache/druid/pull/19071)
+- `caffeine` from `2.8.0` to `2.9.3` [#19208](https://github.com/apache/druid/pull/19208)
+- `commons-io` from `2.17.0` to `2.21.0` [#19208](https://github.com/apache/druid/pull/19208)
+- `commons-collections4` from `4.2` to `4.5.0` [#19208](https://github.com/apache/druid/pull/19208)
+- `commons-compress` from `1.27.0` to `1.28.0` [#19208](https://github.com/apache/druid/pull/19208)
+- `zstd-jni` from `1.5.2-3` to `1.5.7-7` [#19208](https://github.com/apache/druid/pull/19208)
+- `scala-library` from `2.12.7` to `2.13.16` [#19208](https://github.com/apache/druid/pull/19208)
+- - `iceberg` from `1.7.2` to `1.10.0` [#19232](https://github.com/apache/druid/pull/19232)
+- `parquet` from `1.15.2` to `1.16.0` [#19232](https://github.com/apache/druid/pull/19232)
+- `avro` from `1.11.5` to `1.12.0` [#19232](https://github.com/apache/druid/pull/19232)
+- - `jackson` from `2.19.2` to `2.20.2` [#19248](https://github.com/apache/druid/pull/19248)
+- `netty4` from `4.2.6.Final` to `4.2.12.Final` [#19248](https://github.com/apache/druid/pull/19248)
+- `errorprone` from `2.35.1` to `2.41.0` [#19248](https://github.com/apache/druid/pull/19248)
+- `bcprov-jdk18on` / `bcpkix-jdk18on` from `1.81` to `1.82` [#19248](https://github.com/apache/druid/pull/19248)
+- `RoaringBitmap` from `0.9.49` to `1.6.13` [#19248](https://github.com/apache/druid/pull/19248)
+- `jedis` from `5.1.2` to `7.0.0` [#19248](https://github.com/apache/druid/pull/19248)
+- `snakeyaml` from `2.4` to `2.5` [#19248](https://github.com/apache/druid/pull/19248)
+- `aircompressor` from `0.21` to `2.0.2` [#19248](https://github.com/apache/druid/pull/19248)
+- `reflections` from `0.9.12` to `0.10.2` [#19248](https://github.com/apache/druid/pull/19248)
+- `httpclient5` from `5.5` to `5.5.1` [#19248](https://github.com/apache/druid/pull/19248)
+- `jakarta.activation` from `1.2.2` to `2.0.1` [#19248](https://github.com/apache/druid/pull/19248)
+- `netty-tcnative-boringssl-static` from `2.0.73.Final` to `2.0.75.Final` [#19248](https://github.com/apache/druid/pull/19248)
+- `maven-compiler-plugin` from `3.11.0` to `3.14.1` [#19248](https://github.com/apache/druid/pull/19248)

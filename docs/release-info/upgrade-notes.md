@@ -103,6 +103,15 @@ Segment locking and `NumberedOverwriteShardSpec` are deprecated and will be remo
 
 ### Incompatible changes
 
+#### Removed `ParseSpec` and deprecated parsers
+
+The Parser for native batch tasks and streaming ingestion indexing services has been removed. Where possible, use the input format instead. Note that `JavascriptParseSpec` and `JSONLowercaseParseSpec` have no InputFormat equivalents. 
+
+Druid supports custom text data formats and can use the Regex input format to parse them. However, be aware doing this to
+parse data is less efficient than writing a native Java `InputFormat` extension, or using an external stream processor. We welcome contributions of new input formats.
+
+[#19239](https://github.com/apache/druid/pull/19239)
+
 #### Removed `defaultProcessingRate` config
 
 This config allowed scaling actions to begin prior to the first metrics becoming available. 
