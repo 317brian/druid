@@ -1317,6 +1317,7 @@ pull-deps
 sqlserver-metadata-storage
 statsd-emitter
 coords
+cooldown
 dimName
 maxCoords
 Mb
@@ -1638,6 +1639,7 @@ timestamp_parse
 timestamp_shift
 todegrees
 toradians
+typechecking
 ulp
 unix_timestamp
 value1
