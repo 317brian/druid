@@ -67,7 +67,7 @@ Use one of Druid's other supported ingestion methods, such as SQL-based ingestio
 
 ### Query blocklist
 
-You can now create a query blocklist for dynamically blocking queries without restarting your deployment. You can block queries by datasource, query type, or query context using the new `/druid/coordinator/v1/config/broker` API. Block rules use `AND` logic, which means all criteria must match. Druid stores the rules in the metadata database.
+You can now use the using the `/druid/coordinator/v1/config/broker` API tp create a query blocklist to dynamically block queries by datasource, query type, or query context. The blocklist takes effect without a restarting Druid. Block rules use `AND` logic, which means all criteria must match.
 
 The following example blocks all groupBy queries on the `wikipedia` datasource with a query context parameter of `priority` equal to `0`:
 
@@ -89,7 +89,7 @@ POST /druid/coordinator/v1/config/broker
 
 ### Minor compaction for Overlord-based compaction (experimental)
 
-You can now configure minor compaction. With minor compaction, Druid only compacts newly ingested segments while upgrading existing compacted segments. When Druid upgrades segments, it updates the metadata instead of using resources to compact it again. You can use the native compaction engine or the  MSQ task engine.
+You can now configure minor compaction to compact only newly ingested segments while upgrading existing compacted segments. When Druid upgrades segments, it updates the metadata instead of using resources to compact it again. You can use the native compaction engine or the  MSQ task engine.
 
 Use the `mostFragmentedFirst` compaction policy and set either a percentage of rows-based or byte-based threshold for minor compaction.
 
@@ -117,7 +117,7 @@ Tombstones for JSON-based native batch ingestion (the `dropExisting` flag for `i
 
 ### Dynamic default query context
 
-You can now add default query context parameters as a dynamic configuration to the Broker. This allows you to override static defaults set in your runtime properties without restarting your deployment or having to update multiple queries individually. Druid resolves which query context parameters to use based on the following priority:
+You can now add default query context parameters as a dynamic configuration to the Broker. This allows you to override static defaults set in your runtime properties without restarting your deployment or having to update multiple queries individually. Druid applies query context parameters based on the following priority:
 
 1. The query context included with the query
 1. The query context set as a dynamic configuration on the Broker
@@ -125,14 +125,14 @@ You can now add default query context parameters as a dynamic configuration to t
 1. The defaults that ship with Druid
 
 Note that like other Broker dynamic configuration, this is best-effort. Settings may not be applied in certain
-cases, such as when a Broker has recently started and hasn't received the config yet, or if the
+cases, such as when a Broker has recently started and hasn't received the configuration yet, or if the
 Broker can't contact the Coordinator. If a query context parameter is critical for all your queries, set it in the runtime properties.
 
 [#19146](https://github.com/apache/druid/pull/19146)
 
 ### `sys.queries` table (experimental)
 
-The new system queries table provides information about currently running and recently completed queries that use the Dart engine. This table is off by default. To enable the table, set the following config:
+The new system queries table provides information about currently running and recently completed queries that use the Dart engine. This table is off by default. To enable the table, set the following:
 
 ```
 druid.sql.planner.enableSysQueriesTable = true
@@ -146,11 +146,11 @@ As part of this change, the `/druid/v2/sql/queries` API now supports an `include
 
 Auto-compaction using compaction supervisors has been improved and is now generally available.
 
-As part of the improvement, instead of individual compacted segments having to store their full compaction state in the metadata store, states are now stored in a central location, a new `indexingStates` table, in the metadata store. Individual segments only need to store a unique reference (`indexing_state_fingerprint`) to their full compaction state. 
+As part of the improvement compaction states are now stored in a central location, a new `indexingStates` table. Individual segments only need to store a unique reference (`indexing_state_fingerprint`) to their full compaction state.
 
 Since many segments in a single datasource share the same underlying compaction state, this greatly reduces metadata storage requirements for automatic compaction.
 
-For backwards compatibility, detailed compaction state will continue to be persisted in each segment for now. This will be removed in a future release.
+For backwards compatibility, Druid continues to persist the detailed compaction state in each segment. This functionality will be removed in a future release.
 
 You can stop storing detailed compaction state by setting `storeCompactionStatePerSegment` to `false` in the cluster compaction config. If you turn it off and need to downgrade, Druid needs to re-compact any segments that have been compacted since you changed the config.
 
@@ -209,7 +209,7 @@ This section contains detailed release notes separated by areas.
 - Added a detail dialog to the **Services** page [#18960](https://github.com/apache/druid/pull/18960)
 - Added icons to indicate when data is loaded into virtual storage, including a tooltip that shows all the counters for the data [#19010](https://github.com/apache/druid/pull/19010)
 - Added support for Dart reports [#18897](https://github.com/apache/druid/pull/18897)
-- Changed what's considered an active worker: any nonzero rows, files, bytes, frames, or wall time is enough to consider a worker active [#19183](https://github.com/apache/druid/pull/19183)
+- Changed the criteria for active workers: any nonzero rows, files, bytes, frames, or wall time is enough to consider a worker active [#19183](https://github.com/apache/druid/pull/19183)
 - Changed the **Cancel query** option to show only if a query is in an accepted or running state [#19182](https://github.com/apache/druid/pull/19182)
 - Changed the ordering of the current Dart queries panel to show queries in the following order: RUNNING, ACCEPTED, and then COMPLETED. RUNNING and ACCEPTED queries are ordered by the most recent first (based on timestamp). COMPLETED queries are sorted by finish time [#19237](https://github.com/apache/druid/pull/19237)
 
@@ -312,9 +312,9 @@ GROUP BY 1, 2
 Operators can now configure two new Broker `TierSelectorStrategy` implementations:
 
 - `strict` - Only selects servers whose priorities match the configured list. Example configuration: `druid.broker.select.tier=strict` and `druid.broker.select.tier.strict.priorities=[1]`.
-- `pooled` - Pools servers across the configured priorities and selects among them, allowing queries to utilize multiple priority tiers for improved availability. Example configuration: `druid.broker.select.tier=pooled` and `druid.broker.select.tier.pooled.priorities=[2,1]`.
+- `pooled` - Pools servers across the configured priorities and selects among them, allowing queries to use multiple priority tiers for improved availability. Example configuration: `druid.broker.select.tier=pooled` and `druid.broker.select.tier.pooled.priorities=[2,1]`.
 
-These strategies can also be configured for realtime servers using `druid.broker.realtime.select.tier`.
+You can also use `druid.broker.realtime.select.tier` to  configure these strategies for realtime servers.
 
 [#19094](https://github.com/apache/druid/pull/19094)
 
@@ -390,24 +390,24 @@ Added a new `supervisor/count` metric when `SupervisorStatsMonitor` is enabled i
 
 #### Filtering metrics
 
-Operators can limit which metrics the logging emitter writes by setting `druid.emitter.logging.shouldFilterMetrics=true` and, if desired, `druid.emitter.logging.allowedMetricsPath` to a JSON object file where the keys are metric names. A missing custom file results in a warning and use of the bundled `defaultMetrics.json`. Alerts and other non-metric events are always logged.
+Operators can set `druid.emitter.logging.shouldFilterMetrics=true` to limit which metrics the logging emitter writes. Optionally, they can set `druid.emitter.logging.allowedMetricsPath` to a JSON object file where the keys are metric names. A missing custom file results in a warning and use of the bundled `defaultMetrics.json`. Alerts and other non-metric events are always logged.
 
 [#19030](https://github.com/apache/druid/pull/19030)
 
 #### New Broker metrics
 
-Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSignature/column/count` metrics to get visibility into when the Broker's segment metadata cache's row signature for each datasource is initialized and updated.
+Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSignature/column/count` metrics to expose events when the Broker initializes and updates the row signature in the the segment metadata cache for each datasource.
 
 [#18966](https://github.com/apache/druid/pull/18966)
 
 #### Other metrics and monitoring improvements
 
 - Added the following metrics to the default for Prometheus: `mergeBuffer/bytesUsed` and `mergeBuffer/maxBytesUsed` [#19110](https://github.com/apache/druid/pull/19110)
-- Added compaction mode to what gets emitted for the `compact/task/count` metric [#19151](https://github.com/apache/druid/pull/19151)
+- Added compaction mode to the `compact/task/count` metric [#19151](https://github.com/apache/druid/pull/19151)
 - Added support for logging and emitting SQL dynamic parameter values [#19067](https://github.com/apache/druid/pull/19067)
-- Added `ingest/rows/published`, which gets emitted from all task types to denote the total row count of successfully published segments [#19177](https://github.com/apache/druid/pull/19177)
-- Added `queries` and `totalQueries` counters, which reflect queries made to realtime servers to get realtime data
-- Added `tier/storage/capacity` metric for the Coordinator to emit that is guaranteed to reflect the total `StorageLocation` size configured across all Historicals in a tier [#18962](https://github.com/apache/druid/pull/18962)
+- Added `ingest/rows/published`, which all task types emit to denote the total row count of successfully published segments [#19177](https://github.com/apache/druid/pull/19177)
+- Added `queries` and `totalQueries` counters, which reflect queries made to realtime servers to retrieve realtime data
+- Added `tier/storage/capacity` metric for the Coordinator. This metric is guaranteed to reflect the total `StorageLocation` size configured across all Historicals in a tier [#18962](https://github.com/apache/druid/pull/18962)
 - Added new metrics for virtual storage fabric to the MSQ task engine `ChannelCounters`: `loadBytes`, `loadTime`, `loadWait`, and `loadFiles` [#18971](https://github.com/apache/druid/pull/18971)
 - Added `storage/virtual/hit/bytes`, `storage/virtual/hold/count` and `storage/virtual/hold/bytes` metric to `StorageMonitor`
 [#18895](https://github.com/apache/druid/pull/18895) [#19217](https://github.com/apache/druid/pull/19217)
@@ -427,7 +427,7 @@ The gRPC query extension now cancels in-flight queries when clients cancel or di
 
 ##### GCS warehouse
 
-The Iceberg input source now supports GCS warehouses. To use this feature, you need to load the `druid-google-extensions` extension in addition to the Iceberg extension.
+The Iceberg input source now supports GCS warehouses. To use this feature, you must load the `druid-google-extensions` extension in addition to the Iceberg extension.
 [#19137](https://github.com/apache/druid/pull/19137)
 
 ##### Filters
@@ -484,7 +484,7 @@ You can't perform a rolling upgrade from versions earlier than Druid 0.23.
 
 #### Metadata storage for auto-compaction with compaction supervisors
 
-Automatic compaction using compaction supervisors now requires incremental segment metadata caching to be enabled on the Overlord and Coordinator via runtime properties. Specifically, the `druid.manager.segments.useIncrementalCache` config must be set to `always` or `ifSynced`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
+Automatic compaction using compaction supervisors now requires incremental segment metadata caching to be enabled on the Overlord and Coordinator in the runtime properties. Specifically, the `druid.manager.segments.useIncrementalCache` config must be set to `always` or `ifSynced`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
 
 Additionally, metadata store changes are required for this upgrade.
 
