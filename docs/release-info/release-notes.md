@@ -417,6 +417,12 @@ Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSig
 
 ### Extensions
 
+#### Kubernetes
+
+Added a new `WebClientOptions` pass-through for the Vert.x HTTP client in the `kubernetes-overlord-extensions`. Operators can now configure any property on the underlying Vert.x `WebClientOptions` object by using Druid runtime properties. Some of the options you can configure includeconnection pool size, keep-alive timeouts, and idle timeouts.  This is particularly useful for environments with intermediate load balancers that close idle connections. Most Druid deployments will not need this configuration.
+
+[#19071](https://github.com/apache/druid/pull/19071)
+
 #### gRPC 
 
 The gRPC query extension now cancels in-flight queries when clients cancel or disconnect.
@@ -582,7 +588,14 @@ The following dependencies have been updated:
 - Added AWS SDK `2.40.0` [#18891](https://github.com/apache/druid/pull/18891)
 - `com.lmax.disruptor` from `3.3.6` to `3.4.4` [#19122](https://github.com/apache/druid/pull/19122)
 - `org.junit.junit-bom` from `5.13.3` to `5.14.3` [#19122](https://github.com/apache/druid/pull/19122)
-- Several Kubernetes related dependencies have been updated. For more information, see [#19071](https://github.com/apache/druid/pull/19071)
+- - `io.fabric8:kubernetes-client` 7.5.2 → 7.6.0  [#19071](https://github.com/apache/druid/pull/19071)
+- `io.kubernetes:client-java` 19.0.0 → 25.0.0-legacy  [#19071](https://github.com/apache/druid/pull/19071)
+- `com.squareup.okhttp3:okhttp` 4.12.0 → 5.3.2  [#19071](https://github.com/apache/druid/pull/19071)
+- `org.jetbrains.kotlin:kotlin-stdlib` 1.9.25 → 2.2.21  [#19071](https://github.com/apache/druid/pull/19071)
+- `commons-codec:commons-codec` 1.17.1 → 1.20.0  [#19071](https://github.com/apache/druid/pull/19071)
+- `org.apache.commons:commons-lang3` 3.19.0 → 3.20.0  [#19071](https://github.com/apache/druid/pull/19071)
+- `com.google.code.gson:gson` 2.12.0 → 2.13.2  [#19071](https://github.com/apache/druid/pull/19071)
+- `com.amazonaws:aws-java-sdk` 1.12.784 → 1.12.793 [#19071](https://github.com/apache/druid/pull/19071)
 - `caffeine` from `2.8.0` to `2.9.3` [#19208](https://github.com/apache/druid/pull/19208)
 - `commons-io` from `2.17.0` to `2.21.0` [#19208](https://github.com/apache/druid/pull/19208)
 - `commons-collections4` from `4.2` to `4.5.0` [#19208](https://github.com/apache/druid/pull/19208)
