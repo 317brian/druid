@@ -67,7 +67,7 @@ Use one of Druid's other supported ingestion methods, such as SQL-based ingestio
 
 ### Query blocklist
 
-You can now use the using the `/druid/coordinator/v1/config/broker` API tp create a query blocklist to dynamically block queries by datasource, query type, or query context. The blocklist takes effect without a restarting Druid. Block rules use `AND` logic, which means all criteria must match.
+You can now use the using the `/druid/coordinator/v1/config/broker` API to create a query blocklist to dynamically block queries by datasource, query type, or query context. The blocklist takes effect without a restarting Druid. Block rules use `AND` logic, which means all criteria must match.
 
 The following example blocks all groupBy queries on the `wikipedia` datasource with a query context parameter of `priority` equal to `0`:
 
@@ -268,7 +268,7 @@ Added a new groupBy query configuration property `druid.query.groupBy.maxSpillFi
 
 #### Improved handling of nested aggregates
 
-Druid can now merge two Aggregates with a Projection between them. For example, the following query:
+Druid can now merge two aggregates with a projection between them. For example, the following query:
 
 ```sql
 SELECT
@@ -429,7 +429,7 @@ Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSig
 
 #### Kubernetes
 
-Added a new `WebClientOptions` pass-through for the Vert.x HTTP client in the `kubernetes-overlord-extensions`. Operators can now configure any property on the underlying Vert.x `WebClientOptions` object by using Druid runtime properties. Some of the options you can configure includeconnection pool size, keep-alive timeouts, and idle timeouts.  This is particularly useful for environments with intermediate load balancers that close idle connections. Most Druid deployments will not need this configuration.
+Added a new `WebClientOptions` pass-through for the Vert.x HTTP client in the `kubernetes-overlord-extensions`. Operators can now configure any property on the underlying Vert.x `WebClientOptions` object by using Druid runtime properties. Some of the options you can configure include connection pool size, keep-alive timeouts, and idle timeouts. This is particularly useful for environments with intermediate load balancers that close idle connections. Most Druid deployments will not need this configuration.
 
 [#19071](https://github.com/apache/druid/pull/19071)
 
@@ -564,7 +564,7 @@ Druid now defaults to v1 of the front-coded format instead of version 0 if enabl
 
 ### Developer notes
 
-- Added `typecheck` to `npm run test-unit` to ensure TypeScript typechecking happens on calls to `test-unit` [#19251](https://github.com/apache/druid/pull/19251)
+- Added `typecheck` to `npm run test-unit` to ensure TypeScript type checking happens on calls to `test-unit` [#19251](https://github.com/apache/druid/pull/19251)
 - Added a 14 day cooldown to `dependabot` updates to protect against not-yet-discovered regressions and security issues [#19241](https://github.com/apache/druid/pull/19241)
 - Added `AGENTS.md` [#19084](https://github.com/apache/druid/pull/19084)
 - Added a requirement to use [conventional commit syntax](https://www.conventionalcommits.org/en/v1.0.0/) [#19089](https://github.com/apache/druid/pull/19089)

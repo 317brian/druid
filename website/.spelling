@@ -1317,6 +1317,7 @@ pull-deps
 sqlserver-metadata-storage
 statsd-emitter
 coords
+cooldown
 dimName
 maxCoords
 Mb

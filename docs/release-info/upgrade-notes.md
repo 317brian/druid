@@ -62,7 +62,7 @@ You can't perform a rolling upgrade from versions earlier than Druid 0.23.
 
 #### Metadata storage for auto-compaction with compaction supervisors
 
-Automatic compaction using compaction supervisors now requires incremental segment metadata caching to be enabled on the Overlord and Coordinator via runtime properties. Specifically, the `druid.manager.segments.useIncrementalCache` config must be set to `always` or `ifSynced`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
+Automatic compaction using compaction supervisors now requires incremental segment metadata caching to be enabled on the Overlord and Coordinator in the runtime properties. Specifically, the `druid.manager.segments.useIncrementalCache` config must be set to `always` or `ifSynced`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
 
 Additionally, metadata store changes are required for this upgrade.
 
