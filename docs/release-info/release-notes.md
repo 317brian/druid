@@ -113,6 +113,12 @@ As part of the Thrift contributor extension, Druid now supports Thrift-encoded d
 
 To use this feature, you must add `druid-thrift-extensions` to your extension load list.
 
+### Incremental cache
+
+Incremental segment metadata cache (`useIncrementalCache`) is now generally available and defaults to `ifSynced`. Druid blocks reads from the cache until it has synced with the metadata store at least once after becoming leader.
+
+[#19252](https://github.com/apache/druid/pull/19252)
+
 ### Kubernetes-based task management
 
 This extension is now generally available.
@@ -256,6 +262,7 @@ Added `serverPriorityToReplicas` parameter to the streaming supervisor specs (Ka
 
 #### Ingestion improvements
 
+- Added `StringColumnFormatSpec` for string dimension configs [#19258](https://github.com/apache/druid/pull/19258)
 - Sped up task scheduling on the Overlord [#19199](https://github.com/apache/druid/pull/19199)
 
 ### Querying
@@ -358,6 +365,24 @@ The algorithm for cost-based autoscaling has been changed:
 - Improved the performance of the cost-based autoscaler during loaded lag conditions [#18991](https://github.com/apache/druid/pull/18991)
 
 ### Data management
+
+#### Per-segment timeout configuration
+
+You can now set a timeout for the segments in a specific datasource using a dynamic configuration:
+
+```
+POST /druid/coordinator/v1/config/broker
+  {
+    "perSegmentTimeoutConfig": {
+      "my_large_datasource": { "perSegmentTimeoutMs": 5000, "monitorOnly": false },
+      "my_new_datasource": { "perSegmentTimeoutMs": 3000, "monitorOnly": true }
+    }
+  }
+```
+
+This is useful when different datasources have different performance characteristics — for example, allowing longer timeouts for larger datasets.
+
+[#19221](https://github.com/apache/druid/pull/19221)
 
 #### Durable storage cleaner
 
