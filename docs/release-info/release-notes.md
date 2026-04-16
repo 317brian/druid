@@ -95,6 +95,16 @@ Use the `mostFragmentedFirst` compaction policy and set either a percentage of r
 
 [#19059](https://github.com/apache/druid/pull/19059) [#19205](https://github.com/apache/druid/pull/19205) [#19016](https://github.com/apache/druid/pull/19016)
 
+### Cascading reindexing (experimental)
+
+Using cascading reindexing, you can now define age-based rules to automatically apply different compaction configurations based on the age of your data. While standard auto-compaction applies a single flat configuration across an entire datasource, cascading reindexing lets you tailor your compaction settings to the characteristics of your data.
+
+For example, you can keep recent data in hourly segments while automatically rolling up to daily segments after 90 days to reduce segment count. You can also layer on age-based row deletion (such as dropping bot traffic from older data), change compression settings, or shift to rollup with coarser query granularity as data ages. Rules are defined inline in the supervisor spec.
+
+You must use compaction supervisors with the MSQ task engine to use cascading reindexing.
+
+[#18939](https://github.com/apache/druid/pull/18939) [#19213](https://github.com/apache/druid/pull/19213) [#19106](https://github.com/apache/druid/pull/19106) [#19078](https://github.com/apache/druid/pull/19078)
+
 ### Thrift input format
 
 As part of the Thrift contributor extension, Druid now supports Thrift-encoded data for Kafka and Kinesis streaming ingestion.
