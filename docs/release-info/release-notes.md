@@ -231,6 +231,10 @@ This section contains detailed release notes separated by areas.
 
 ### Ingestion
 
+- Added the `maxStringLength` configuration for string dimensions that truncates values exceeding the specified length during ingestion. You can set the length globally using `druid.indexing.formats.maxStringLength` or per-dimension in the ingestion spec [#19146](https://github.com/apache/druid/pull/19146)
+- Added `StringColumnFormatSpec` for string dimension configs [#19258](https://github.com/apache/druid/pull/19258)
+- Sped up task scheduling on the Overlord [#19199](https://github.com/apache/druid/pull/19199)
+
 #### SQL-based ingestion
 
 ##### Other SQL-based ingestion improvements
@@ -258,12 +262,6 @@ Added `serverPriorityToReplicas` parameter to the streaming supervisor specs (Ka
 
 - Improved cost-based autoscaler performance in high lag scenarios [#19045](https://github.com/apache/druid/pull/19045)
 - Improved the performance of realtime task scheduling by ordering schedule requests by priority on the `TaskQueue` [#19203](https://github.com/apache/druid/pull/19203)
-
-
-#### Ingestion improvements
-
-- Added `StringColumnFormatSpec` for string dimension configs [#19258](https://github.com/apache/druid/pull/19258)
-- Sped up task scheduling on the Overlord [#19199](https://github.com/apache/druid/pull/19199)
 
 ### Querying
 
