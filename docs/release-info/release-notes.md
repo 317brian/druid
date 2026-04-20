@@ -144,7 +144,7 @@ Note that like other Broker dynamic configuration, this is best-effort. Settings
 cases, such as when a Broker has recently started and hasn't received the configuration yet, or if the
 Broker can't contact the Coordinator. If a query context parameter is critical for all your queries, set it in the runtime properties.
 
-[#19146](https://github.com/apache/druid/pull/19146)
+[#19144](https://github.com/apache/druid/pull/19144)
 
 ### `sys.queries` table (experimental)
 
