@@ -523,13 +523,16 @@ You can't perform a rolling upgrade from versions earlier than Druid 0.23.
 
 #### Metadata storage for auto-compaction with compaction supervisors
 
-Automatic compaction using compaction supervisors now requires incremental segment metadata caching to be enabled on the Overlord and Coordinator in the runtime properties. Specifically, the `druid.manager.segments.useIncrementalCache` config must be set to `always` or `ifSynced`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
+Automatic compaction using compaction supervisors requires incremental segment metadata caching to be enabled on the Overlord and Coordinator in the runtime properties. 
 
-Additionally, metadata store changes are required for this upgrade.
+As part of this update, Druid requires the incremental cache to be enabled and a new table in the metadata store. No action is required if you are using the default settings for the following configs:
 
-If you already have `druid.metadata.storage.connector.createTables` set to `true`, no action is needed.
+- `druid.manager.segments.useIncrementalCache` 
+- `druid.metadata.storage.connector.createTables`
 
-If you have this feature turned off, you will need to alter the segments table and create the `compactionStates` table. The Postgres DDL is provided below as a guide:
+If `druid.manager.segments.useIncrementalCache` is set to `never`, update it to `ifSynced` or `always`. For more information about the config, see [Segment metadata cache](https://druid.apache.org/docs/latest/configuration/#segment-metadata-cache-experimental).
+
+If you set the `druid.metadata.storage.connector.createTables` config to `false`, you need to manually alter the segments table and create the `compactionStates` table. The Postgres DDL is provided below as a guide:
 
 ```
 -- create the indexing states lookup table and associated indices
