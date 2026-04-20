@@ -172,7 +172,7 @@ You can stop storing detailed compaction state by setting `storeCompactionStateP
 
 This change has upgrade impacts for metadata storage and metadata caching. For more information, see the [Metadata storage for auto-compaction with compaction supervisors](#metadata-storage-for-auto-compaction-with-compaction-supervisors) upgrade note.
 
-[#19113](https://github.com/apache/druid/pull/19113) [#18844](https://github.com/apache/druid/pull/18844)
+[#19113](https://github.com/apache/druid/pull/19113) [#18844](https://github.com/apache/druid/pull/18844) [#19252](https://github.com/apache/druid/pull/19252)
 
 ### Broker tier selection for realtime servers
 
@@ -558,7 +558,7 @@ You may have to adapt the syntax to fit your table naming prefix and metadata st
 
 #### Segment locking
 
-Segment locking and `NumberedOverwriteShardSpec` are deprecated and will be removed in a future release. Use time chunk locking instead. You can make sure only time chunk locking is used by setting `druid.indexer.tasklock.forceTimeChunkLock` to `true`.
+Segment locking and `NumberedOverwriteShardSpec` are deprecated and will be removed in a future release. Use time chunk locking instead. You can make sure only time chunk locking is used by setting `druid.indexer.tasklock.forceTimeChunkLock` to `true`, which is the default.
 
 [#19050](https://github.com/apache/druid/pull/19050)
 
