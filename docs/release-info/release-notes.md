@@ -67,7 +67,7 @@ Use one of Druid's other supported ingestion methods, such as SQL-based ingestio
 
 ### Query blocklist
 
-You can now use the using the `/druid/coordinator/v1/config/broker` API to create a query blocklist to dynamically block queries by datasource, query type, or query context. The blocklist takes effect without a restarting Druid. Block rules use `AND` logic, which means all criteria must match.
+You can now use the Broker API (`/druid/coordinator/v1/config/broker`) to create a query blocklist to dynamically block queries by datasource, query type, or query context. The blocklist takes effect without a restarting Druid. Block rules use `AND` logic, which means all criteria must match.
 
 The following example blocks all groupBy queries on the `wikipedia` datasource with a query context parameter of `priority` equal to `0`:
 
@@ -107,7 +107,7 @@ You must use compaction supervisors with the MSQ task engine to use cascading re
 
 ### Thrift input format
 
-As part of the Thrift contributor extension, Druid now supports Thrift-encoded data for Kafka and Kinesis streaming ingestion.
+As part of the Thrift contributor extension, Druid now supports Thrift-encoded data for Kafka and Kinesis streaming ingestion using `InputFormat`. Previously, Druid  supported this through parsers, which have been removed in Druid 37.
 
 [#19111](https://github.com/apache/druid/pull/19111)
 
@@ -122,12 +122,6 @@ Incremental segment metadata cache (`useIncrementalCache`) is now generally avai
 ### Kubernetes-based task management
 
 This extension is now generally available.
-
-[#19128](https://github.com/apache/druid/pull/19128)
-
-### Tombstones
-
-Tombstones for JSON-based native batch ingestion (the `dropExisting` flag for `ioConfig`) are now generally available.
 
 [#19128](https://github.com/apache/druid/pull/19128)
 
@@ -210,6 +204,8 @@ This section contains detailed release notes separated by areas.
 
 #### Changed storage column displays
 
+The following improvements have been made to how storage columns are displayed in the web console:
+
 - Improved the compaction config view to 
 - Renamed **Current size** to **Assigned size**.
 - Renamed **Max size** to **Effective size**. It now displays the smaller value between `max_size` and `storage_size`. The max size is still shown as a tooltip.
@@ -231,8 +227,25 @@ This section contains detailed release notes separated by areas.
 
 ### Ingestion
 
-- Added the `maxStringLength` configuration for string dimensions that truncates values exceeding the specified length during ingestion. You can set the length globally using `druid.indexing.formats.maxStringLength` or per-dimension in the ingestion spec [#19146](https://github.com/apache/druid/pull/19146)
-- Added `StringColumnFormatSpec` for string dimension configs [#19258](https://github.com/apache/druid/pull/19258)
+#### Truncate string columns
+
+Use the `StringColumnFormatSpec` config to set the maximum length for string dimension columns you ingest:
+
+- For a specific dimension: `dimensionSchema.columnFormatSpec.maxStringLength`
+- For a specific job: `indexSpec.columnFormatSpec.maxStringLength`
+- Cluster-wide: `druid.indexing.formats.maxStringLength`
+
+Druid truncates any string longer than the specified length. The default is to not truncate string values. 
+
+[#19146](https://github.com/apache/druid/pull/19146) [#19258](https://github.com/apache/druid/pull/19258) (https://github.com/apache/druid/pull/19198)
+
+
+- Added the `maxStringLength` configuration for string dimensions that truncates values exceeding the specified length during ingestion. You can set the length globally using `druid.indexing.formats.maxStringLength` or per-dimension in the ingestion spec
+- Added `StringColumnFormatSpec` for string dimension configs 
+
+
+#### Other ingestion improvements
+
 - Sped up task scheduling on the Overlord [#19199](https://github.com/apache/druid/pull/19199)
 
 #### SQL-based ingestion
@@ -394,7 +407,6 @@ The new configuration property `druid.msq.intermediate.storage.cleaner.durationT
 
 - Added the `druid.storage.transfer.asyncHttpClientType` config that specifies which async HTTP client to use for S3 transfers: `crt` for Amazon CRT or `netty` for Netty NIO [#19249](https://github.com/apache/druid/pull/19249)
 - Added a mechanism to automatically clean up intermediary files on HDFS storage [#19187](https://github.com/apache/druid/pull/19187)
-- Changed the default value for `druid.indexing.formats.maxStringLength` to null from 0 [#19198](https://github.com/apache/druid/pull/19198)
 
 ### Metrics and monitoring
 
@@ -501,6 +513,12 @@ Use one of Druid's other supported ingestion methods, such as SQL-based ingestio
 
 [#19109](https://github.com/apache/druid/pull/19109)
 
+#### AWS SDK v2
+
+Druid now uses AWS SDK version `2.40.0` since v1 of the SDK is at end of life. 
+
+[#18891](https://github.com/apache/druid/pull/18891)
+
 #### Segment metadata cache on by default
 
 Starting in Druid 37, the segment metadata cache is on by default. This feature allows the Broker to cache segment metadata polled from the Coordinator, rather than having to fetch metadata for every query against the `sys.segments` table. This improves performance but increases memory usage on Brokers.
@@ -509,11 +527,23 @@ The `druid.sql.planner.metadataSegmentCacheEnable` config controls this feature.
 
 [#19075](https://github.com/apache/druid/pull/19075)
 
-#### Streaming ingestion `parser`
+#### Parser changes
+
+##### Streaming ingestion `parser`
 
 Support for the deprecated `parser` has been removed for streaming ingest tasks such as Kafka and Kinesis. Operators must now specify `inputSource`/`inputFormat` on the `ioConfig` of the supervisor spec, and the `dataSchema` must not specify a parser. Do this before upgrading to Druid 37 or newer.
 
 [#19173](https://github.com/apache/druid/pull/19173) [#19166](https://github.com/apache/druid/pull/19166)
+
+##### Removed `ParseSpec` and deprecated parsers
+
+The Parser for native batch tasks and streaming ingestion indexing services has been removed. Where possible, use the input format instead. Note that `JavascriptParseSpec` and `JSONLowercaseParseSpec` have no InputFormat equivalents. 
+
+Druid supports custom text data formats and can use the Regex input format to parse them. However, be aware doing this to
+parse data is less efficient than writing a native Java `InputFormat` extension, or using an external stream processor. We welcome contributions of new input formats.
+
+[#19239](https://github.com/apache/druid/pull/19239)
+
 
 #### Rolling upgrades from Druid versions prior to version 0.23
 
@@ -523,9 +553,7 @@ You can't perform a rolling upgrade from versions earlier than Druid 0.23.
 
 #### Metadata storage for auto-compaction with compaction supervisors
 
-Automatic compaction using compaction supervisors requires incremental segment metadata caching to be enabled on the Overlord and Coordinator in the runtime properties. 
-
-As part of this update, Druid requires the incremental cache to be enabled and a new table in the metadata store. No action is required if you are using the default settings for the following configs:
+Automatic compaction with supervisors requires incremental segment metadata caching on the Overlord and a new metadata store table; no action is required if you are using the default settings for the following configs:
 
 - `druid.manager.segments.useIncrementalCache` 
 - `druid.metadata.storage.connector.createTables`
@@ -566,15 +594,6 @@ Segment locking and `NumberedOverwriteShardSpec` are deprecated and will be remo
 [#19050](https://github.com/apache/druid/pull/19050)
 
 ### Incompatible changes
-
-#### Removed `ParseSpec` and deprecated parsers
-
-The Parser for native batch tasks and streaming ingestion indexing services has been removed. Where possible, use the input format instead. Note that `JavascriptParseSpec` and `JSONLowercaseParseSpec` have no InputFormat equivalents. 
-
-Druid supports custom text data formats and can use the Regex input format to parse them. However, be aware doing this to
-parse data is less efficient than writing a native Java `InputFormat` extension, or using an external stream processor. We welcome contributions of new input formats.
-
-[#19239](https://github.com/apache/druid/pull/19239)
 
 #### Removed `defaultProcessingRate` config
 
@@ -621,7 +640,6 @@ The following dependencies have been updated:
 - `bytebuddy` from `1.18.3` to `1.18.5` [#19145](https://github.com/apache/druid/pull/19145)
 - Added `objenesis` `3.5` [#19145](https://github.com/apache/druid/pull/19145)
 - `org.apache.zookeeper` from 3.8.4 to 3.8.6 [#19135](https://github.com/apache/druid/pull/19135)
-- Added AWS SDK `2.40.0` [#18891](https://github.com/apache/druid/pull/18891)
 - `com.lmax.disruptor` from `3.3.6` to `3.4.4` [#19122](https://github.com/apache/druid/pull/19122)
 - `org.junit.junit-bom` from `5.13.3` to `5.14.3` [#19122](https://github.com/apache/druid/pull/19122)
 - - `io.fabric8:kubernetes-client` 7.5.2 → 7.6.0  [#19071](https://github.com/apache/druid/pull/19071)
