@@ -105,6 +105,12 @@ You must use compaction supervisors with the MSQ task engine to use cascading re
 
 [#18939](https://github.com/apache/druid/pull/18939) [#19213](https://github.com/apache/druid/pull/19213) [#19106](https://github.com/apache/druid/pull/19106) [#19078](https://github.com/apache/druid/pull/19078)
 
+### Multi-supervisor ingestion
+
+Multi-supervisor ingestion is now generally available. You can run multiple stream supervisors that ingest into the same datasource.
+
+[#18983](https://github.com/apache/druid/pull/18983)
+
 ### Thrift input format
 
 As part of the Thrift contributor extension, Druid now supports Thrift-encoded data for Kafka and Kinesis streaming ingestion using `InputFormat`. Previously, Druid  supported this through parsers, which have been removed in Druid 37.
