@@ -245,11 +245,6 @@ Druid truncates any string longer than the specified length. The default is to n
 
 [#19146](https://github.com/apache/druid/pull/19146) [#19258](https://github.com/apache/druid/pull/19258) (https://github.com/apache/druid/pull/19198)
 
-
-- Added the `maxStringLength` configuration for string dimensions that truncates values exceeding the specified length during ingestion. You can set the length globally using `druid.indexing.formats.maxStringLength` or per-dimension in the ingestion spec
-- Added `StringColumnFormatSpec` for string dimension configs 
-
-
 #### Other ingestion improvements
 
 - Sped up task scheduling on the Overlord [#19199](https://github.com/apache/druid/pull/19199)
