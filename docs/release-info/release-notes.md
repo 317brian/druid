@@ -160,7 +160,7 @@ As part of this change, the `/druid/v2/sql/queries` API now supports an `include
 
 ### Auto-compaction with compaction supervisors
 
-Auto-compaction using compaction supervisors has been improved and is now generally available.
+ Auto-compaction using compaction supervisors has been improved, now generally available, and the recommended default. Automatic compaction tasks are now prefixed with `auto` instead of `coordinator-issued`.
 
 As part of the improvement compaction states are now stored in a central location, a new `indexingStates` table. Individual segments only need to store a unique reference (`indexing_state_fingerprint`) to their full compaction state.
 
