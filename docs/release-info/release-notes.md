@@ -411,7 +411,7 @@ The new configuration property `druid.msq.intermediate.storage.cleaner.durationT
 
 ### Metrics and monitoring
 
-#### Version field
+#### BuildRevision field
 
 All Druid metrics now include `version` and `buildRevision` fields to help you identify which version of Druid is emitting a metric. You can use this information to verify that all nodes in a cluster are running the intended revision during rolling deployments.
 
