@@ -413,7 +413,7 @@ The new configuration property `druid.msq.intermediate.storage.cleaner.durationT
 
 #### BuildRevision field
 
-All Druid metrics now include `version` and `buildRevision` fields to help you identify which version of Druid is emitting a metric. You can use this information to verify that all nodes in a cluster are running the intended revision during rolling deployments.
+All Druid metrics now include a `buildRevision` field to help identify the Git build revision of the Druid server emitting a metric. You can use this information to verify that all nodes in a cluster are running the intended revision.
 
 [#19123](https://github.com/apache/druid/pull/19123)
 
@@ -428,6 +428,7 @@ Added a new `supervisor/count` metric when `SupervisorStatsMonitor` is enabled i
 `GroupByStatsMonitor` now provides the following metrics:
 
 - `mergeBuffer/bytesUsed` 
+- `mergeBuffer/maxBytesUsed` 
 - `mergeBuffer/maxAcquisitionTimeNs`
 - `groupBy/maxSpilledBytes`
 - `groupBy/maxMergeDictionarySize`
