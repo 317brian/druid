@@ -443,7 +443,7 @@ Operators can set `druid.emitter.logging.shouldFilterMetrics=true` to limit whic
 
 #### New Broker metrics
 
-Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSignature/column/count` metrics to expose events when the Broker initializes and updates the row signature in the the segment metadata cache for each datasource.
+Added `segment/schemaCache/rowSignature/changed` and `segment/schemaCache/rowSignature/column/count` metrics to expose events when the Broker initializes and updates the row signature in the segment metadata cache for each datasource.
 
 [#18966](https://github.com/apache/druid/pull/18966)
 
