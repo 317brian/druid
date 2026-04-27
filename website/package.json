@@ -17,10 +17,10 @@
     "clear": "docusaurus clear"
   },
   "engines": {
-    "node": ">=18.0"
+    "node": ">=22.0"
   },
   "volta": {
-    "node": "18.20.7",
+    "node": "22.0",
     "npm": "10.8.2"
   },
   "devDependencies": {
@@ -31,10 +31,11 @@
     "sass": "^1.62.1"
   },
   "dependencies": {
-    "@docusaurus/core": "^3.7.0",
-    "@docusaurus/plugin-client-redirects": "^3.7.0",
-    "@docusaurus/preset-classic": "^3.7.0",
-    "@docusaurus/theme-mermaid": "^3.7.0",
+    "@docusaurus/core": "^3.10.0",
+    "@docusaurus/plugin-client-redirects": "^3.10.0",
+    "@docusaurus/preset-classic": "^3.10.0",
+    "@docusaurus/theme-mermaid": "^3.10.0",
+    "@docusaurus/faster": "^3.10.0",
     "clsx": "^1.1.1",
     "docusaurus": "^1.14.7",
     "docusaurus-lunr-search": "^3.6.0",
