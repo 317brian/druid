@@ -437,9 +437,9 @@ Added a new `supervisor/count` metric when `SupervisorStatsMonitor` is enabled i
 
 #### Filtering metrics
 
-Operators can set `druid.emitter.logging.shouldFilterMetrics=true` to limit which metrics the logging emitter writes. Optionally, they can set `druid.emitter.logging.allowedMetricsPath` to a JSON object file where the keys are metric names. A missing custom file results in a warning and use of the bundled `defaultMetrics.json`. Alerts and other non-metric events are always logged.
+Operators can set `druid.emitter.logging.shouldFilterMetrics=true` to limit which metrics the logging emitter writes. Optionally, they can set `druid.emitter.logging.allowedMetricsPath` to a JSON object file where the keys are metric names. A missing custom file results in a warning and use of the bundled `loggingEmitterAllowedMetrics.json`. Alerts and other non-metric events are always logged.
 
-[#19030](https://github.com/apache/druid/pull/19030)
+[#19030](https://github.com/apache/druid/pull/19030) [#19359](https://github.com/apache/druid/pull/19359)
 
 #### New Broker metrics
 
